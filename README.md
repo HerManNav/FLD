@@ -6,7 +6,7 @@ FLD finds Freenet links on a page and manages downloads through your local Freen
 
 ## Start
 
-For the standalone app, download [FLD.exe (v0.1.2)](https://github.com/HerManNav/FLD/releases/download/v0.1.2/FLD.exe), place it in a writable folder, and double-click it. Access to this private GitHub repository is required. Python is not required.
+For the standalone app, download the last release [FLD.exe (v0.1.2)](https://github.com/HerManNav/FLD/releases/download/v0.1.2/FLD.exe).
 
 For a source checkout, double-click **Start FLD.bat**, or run `python app.py` from this folder. Python with Tkinter is required; FLD has no pip dependencies.
 
