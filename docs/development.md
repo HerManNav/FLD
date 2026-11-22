@@ -54,7 +54,7 @@ the caveman skill for conversation unless the user explicitly changes modes.
 | tools/generate_icon.py | Rebuild app icon from included vector geometry |
 | tools/demo_app.py | In-memory toy-data demo and own-window visual export; never uses the user's queue or node |
 | tools/make_demo_gif.py | Tool-only Pillow encoder for captured BMP/PNG frames and recording manifests |
-| FLD.spec, version_info.txt | One-file windowed Windows executable, bundled ICO, and 0.1.1 resource metadata |
+| FLD.spec, version_info.txt | One-file windowed Windows executable, bundled ICO, and 0.1.2 resource metadata |
 | build_windows.ps1, requirements-build.txt | Pinned Python/PyInstaller build validation and isolated build dependencies |
 
 `Start FLD.bat` starts the source app, which requires Python with Tkinter and

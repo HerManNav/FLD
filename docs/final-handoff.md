@@ -31,9 +31,11 @@ short; update evidence after each accepted source or release change.
 - Mapped list probe: `python tools/benchmark_ui.py`, 150 synthetic rows. Must run in visible Windows desktop.
 - Native opt-ins: set `FLD_TEST_TRAY=1`, `FLD_TEST_WINDOW=1`; rerun full suite on Windows desktop.
 - Demo: `python tools/demo_app.py --record .demo-capture\recording`; encode with `python tools/make_demo_gif.py ...` using bundled Pillow runtime. Demo uses in-memory toy data, no real queue/node.
-- Build: 64-bit Python 3.15.2; `.venv-build`; pinned PyInstaller from `requirements-build.txt`; run `\.\build_windows.ps1`. Output `dist/FLD.exe`; build tools add no runtime deps.
+- Build: 64-bit Python 3.15.2; `.venv-build`; pinned PyInstaller from `requirements-build.txt`; run `.\build_windows.ps1`. Output `dist/FLD.exe`; build tools add no runtime deps.
 - Frozen smoke: copy EXE alone to writable temp folder; run from unrelated cwd with Windows-only PATH: `FLD.exe --smoke-test REPORT.json`. Uses temp queue, no local node. Record report and SHA-256.
-- Published release v0.1.1 in private repo. Local rebuild has same 0.1.1 PE metadata and is unpublished: `dist/FLD.exe` SHA-256 `d5309c4c84c359ad0d851920691f18f6c9302cf3321d4473d544b07e9c057a02` (15,225,783 bytes).
+- Prior published release: v0.1.1 in the private repository.
+- v0.1.2 release target: [GitHub release page](https://github.com/HerManNav/FLD/releases/tag/v0.1.2), asset `FLD.exe`. Staged build is 15,224,757 bytes; SHA-256 `7240fd18eed2cc20d2f7d1c6b33f8bad310308b0823a65ba65f689a7998aa292`. FileVersion and ProductVersion are 0.1.2; numeric versions are 0.1.2.0.
+- Isolated v0.1.2 smoke passed with exit 0 from an unrelated working directory and Windows-only PATH. Frozen Python 3.15.2 AMD64 and Tk 9.0.4; icon loading, temporary-data cleanup, output sentinel preservation, and worker shutdown passed. No live queue or node used.
 - Final Windows gate: 108 tests passed with tray/window opt-ins, no skips, 31.895s. Mapped 150-row benchmark: one-row 9.0ms mean / 11.1ms p95 / 12.7ms max; three-row with progress 10.9 / 13.9 / 21.0ms.
 - Isolated copied EXE smoke passed: unrelated cwd, Windows-only PATH, frozen Python 3.15.2 AMD64 + Tk 9.0.4; executable-rooted data, icon, three controls/no Select, worker stopped, completed output sentinel intact, temp data removed. No live queue or node used.
 - Root `FLD.exe` is occupied by running version. `dist/FLD.exe` uses a separate adjacent queue. After File > Exit, place rebuilt EXE beside root `queue.sqlite3` to reuse that queue; never overwrite a running EXE.

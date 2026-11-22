@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(0, 1, 0, 0),
-    prodvers=(0, 1, 0, 0),
+    filevers=(0, 1, 2, 0),
+    prodvers=(0, 1, 2, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -15,11 +15,11 @@ VSVersionInfo(
         '040904B0',
         [StringStruct('CompanyName', 'FLD'),
          StringStruct('FileDescription', 'Freenet Link Downloader'),
-         StringStruct('FileVersion', '0.1.1'),
+         StringStruct('FileVersion', '0.1.2'),
          StringStruct('InternalName', 'FLD'),
          StringStruct('OriginalFilename', 'FLD.exe'),
          StringStruct('ProductName', 'Freenet Link Downloader'),
-         StringStruct('ProductVersion', '0.1.1')]
+         StringStruct('ProductVersion', '0.1.2')]
       )
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
