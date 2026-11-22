@@ -54,7 +54,7 @@ the caveman skill for conversation unless the user explicitly changes modes.
 | tools/generate_icon.py | Rebuild app icon from included vector geometry |
 | tools/demo_app.py | In-memory toy-data demo and own-window visual export; never uses the user's queue or node |
 | tools/make_demo_gif.py | Tool-only Pillow encoder for captured BMP/PNG frames and recording manifests |
-| FLD.spec, version_info.txt | One-file windowed Windows executable, bundled ICO, and 0.1.0 resource metadata |
+| FLD.spec, version_info.txt | One-file windowed Windows executable, bundled ICO, and 0.1.1 resource metadata |
 | build_windows.ps1, requirements-build.txt | Pinned Python/PyInstaller build validation and isolated build dependencies |
 
 `Start FLD.bat` starts the source app, which requires Python with Tkinter and
@@ -98,18 +98,18 @@ while scanning. Cancel all cancels scanning plus active/paused requests. The
 Remove unstarted also invalidates the current scan, while preserving
 started downloads. Find links adds unique keys instead of replacing the queue.
 
-App retains complete row data and pending checkbox intentions so delayed
-snapshots do not undo a click. Details are keyed by UUID, not displayed position.
+App retains complete row data. Details are keyed by UUID, not displayed position.
 Maintain these identities when sorting/filtering. Removal acknowledgements and
 UUID tombstones prevent late snapshots from restoring removed rows; no
 empty-queue barrier is required while started rows remain.
 
-Transient row highlights use a separate UUID set, anchor, and focus. They never
-change the persisted download checkbox. Selected deletion freezes visible UUIDs
-before a default-No confirmation, then waits for durable action-worker
-acknowledgement. It leaves scans running. Hidden selected UUIDs survive filtering
-but are outside deletion scope. Acknowledgements precede scan-generation checks
-and coalesced snapshots; errors and cancellation release the modal/pending guard.
+Transient row highlights use a separate UUID set, anchor, and focus. They are
+the sole scope for Download selected and Delete selected. Highlights never
+change or read legacy task `selected` values. Selected deletion freezes visible
+UUIDs before default-No confirmation, then waits for durable action-worker
+acknowledgement. It leaves scans running. Hidden highlights survive filtering
+but remain outside visible actions. Acknowledgements precede scan-generation
+checks and coalesced snapshots; errors and cancellation release the pending guard.
 See the [selection contract](selection-design.md#button-confirmation-and-acknowledgement).
 Remove completed uses the same durable deletion seam with authoritative done
 UUIDs and its own worker acknowledgement/error. It is global and leaves scans
@@ -124,9 +124,8 @@ collect obsolete Tk sessions on the GUI thread.
 
 DownloadList draws only visible row graphics in one canvas. Off-screen records
 remain dictionaries. Recycle slots and keep overlapping UUIDs in the same slot
-while scrolling. Four native row controls are shared across the whole list:
-checkbox, Start, Pause, Cancel. Other apparent row buttons/checkmarks are canvas
-graphics. Never add one native widget per task or one canvas per row.
+while scrolling. Three native row controls are shared across the whole list:
+Start, Pause, Cancel. Never add one native widget per task or one canvas per row.
 
 Natural column widths measure font/content and cap filename growth; persisted
 widths override them. Divider drag is throttled to about 33ms; double-click
@@ -136,13 +135,14 @@ uses bounded caching, so pointer/scroll paths must not remeasure every filename.
 Wheel routing covers canvas, controls, header, gaps, and focused-widget Windows
 delivery. Fractional wheel deltas accumulate; Shift+wheel moves horizontally.
 Up/Down moves the focused UUID and actual native-control target. Ctrl moves only
-focus, Shift extends the row range, and Ctrl+Shift adds a range. Canvas and native
-checkbox Space toggle the focused UUID's download checkbox once, independently
-of hover. Right-click preserves an already selected group or selects one new
+focus, Shift extends the row range, and Ctrl+Shift adds a range. Canvas Space
+toggles the focused UUID's highlight once, independently of hover. Start/Pause/
+Cancel keep native Space activation. Right-click preserves an already highlighted group or selects one new
 UUID before showing the shared Delete selected menu. Delete acts only while
 the table or its native row controls have keyboard focus.
 Ctrl+A uses that same table-local focus scope and adds visible UUID highlights
-without changing download checkboxes, anchor, focus, details, or the viewport.
+without changing anchor, focus, details, or the viewport. Select none removes
+only visible highlights; hidden highlights survive.
 Source and filter entry text selection remains native. See the
 [Ctrl+A contract](release-design.md#ctrla-row-highlights).
 Hide overlays during scrolling, then restore them after a 150ms quiet interval.
@@ -154,11 +154,11 @@ Consult change-design.md before changing any offsets.
 At 360px body height, the row pool remains at most 15; taller viewports may use
 more visible slots, never all task records. Benchmark the real mapped window.
 
-Current benchmark history on this PC: older widget-heavy scrolling averaged
+Historical benchmark results on this PC: older widget-heavy scrolling averaged
 178ms per one-row scroll; canvas reuse brought that to about 13ms. Three-row
 scrolls with changing progress averaged about 16ms. These are reference
 observations, not portable timing guarantees or a substitute for a fresh run.
-After the queue-usability changes, the mapped 150-row benchmark measured 10.3ms
+The prior v0.1.0 queue-usability build's mapped 150-row benchmark measured 10.3ms
 mean and 12.2ms p95 per one-row scroll. Three-row scrolling with concurrent
 progress measured 12.5ms mean, 15.3ms p95, and 20.3ms maximum on this PC.
 
@@ -179,12 +179,17 @@ timing. It does not access the SQLite connection directly. Task additions and
 their next-display-ID counter share one transaction; migration preserves that
 same boundary and existing preference values.
 
-Metadata includes the persistent client name, column widths, next_display_id,
-and window_preferences. Task payloads include display_id and ever_started.
-Keep UUIDs and all existing payload fields.
-See the design for atomic counter assignment, legacy inference, and backward
-11-column width compatibility. No migration should touch the live user queue
-while testing; use temporary files or copies.
+Metadata includes the persistent client name, `column_widths_v2`, named
+`sort_preferences`, next_display_id, and window_preferences. Legacy
+`column_widths` remains untouched for backward readers. Task payloads include
+display_id and ever_started. Keep UUIDs and all existing payload fields.
+Width migration maps legacy 12-column and pre-ID 11-column arrays into the
+current 11 columns; valid v2 widths take precedence. No migration should touch
+the live user queue while testing; use temporary files or copies.
+
+Sort preference names are `id`, `file`, `size`, `speed`, `status`, `progress`,
+`elapsed`, and `eta`. Metadata-only sort writes run through the action worker
+and do not checkpoint task payloads.
 
 Task desired states are new, running, paused, cancelled, failed, done, and the
 old internal removed state. Status is display text, not the authoritative state.
@@ -199,8 +204,7 @@ accepted Start. Completed files, paused partials, cancellations with history,
 and failed attempts survive. Cancel discards node requests while retaining row
 history. The obsolete blanket `clear` writer is removed; legacy saved `removed`
 tasks still reconcile correctly. The unused manager-wide `select_all` writer
-is removed; App's Select all and Select none use the visible UUID scope through
-`select_many`.
+is removed. Select all and Select none update transient visible UUID highlights.
 
 Selected deletion marks exact UUID tombstones durably. Keep each tombstone until
 owned local-node request cleanup is proved; never unlink a completed output.
@@ -357,7 +361,7 @@ The mapped 150-task selection gate measured:
 
 The preceding refactor three-row mean was 11.6ms. These measurements show no
 material regression on this PC and are not portable timing guarantees. The
-virtual canvas still uses four shared native row controls and a visible-height
+This historical refactor benchmark used four shared native row controls and a visible-height
 slot pool. The production DPI-aware 800x460 layout probe verified two action
 rows with full button labels; Open download folder measured 161px actual and
 161px requested, replacing the clipped 120px one-row result.
@@ -448,7 +452,7 @@ The standalone-release source gate passed all 104 tests with both native
 Windows opt-ins and no skips in 30.523 seconds on 2026-11-22. The mapped
 150-task benchmark measured one-row scrolling at 9.5ms mean, 11.4ms p95,
 and 11.8ms maximum; three-row scrolling with progress measured 11.2ms mean,
-13.3ms p95, and 13.5ms maximum. The four shared controls and bounded visible
+13.3ms p95, and 13.5ms maximum. Its four shared controls and bounded visible
 slot pool remain intact. Production DPI-aware 800x460 measurements confirmed
 all second-row labels fit. Full release, build, and actual-artifact evidence
 belongs in [release verification](release-design.md#verification-results).

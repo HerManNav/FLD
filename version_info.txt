@@ -15,11 +15,11 @@ VSVersionInfo(
         '040904B0',
         [StringStruct('CompanyName', 'FLD'),
          StringStruct('FileDescription', 'Freenet Link Downloader'),
-         StringStruct('FileVersion', '0.1.0'),
+         StringStruct('FileVersion', '0.1.1'),
          StringStruct('InternalName', 'FLD'),
          StringStruct('OriginalFilename', 'FLD.exe'),
          StringStruct('ProductName', 'Freenet Link Downloader'),
-         StringStruct('ProductVersion', '0.1.0')]
+         StringStruct('ProductVersion', '0.1.1')]
       )
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])

@@ -771,7 +771,7 @@ os._exit(0)
         finally:
             store.close()
 
-    def test_legacy_widths_and_window_preferences_are_validated(self):
+    def test_width_v2_migration_and_window_preferences_are_validated(self):
         path = self.root / "preferences.sqlite3"
         store = QueueStore(path)
         with store.db:
@@ -781,15 +781,96 @@ os._exit(0)
         store.close()
         manager = DownloadManager(path, self.root / "preferences-downloads", autostart=False)
         self.managers.append(manager)
-        self.assertEqual(manager.column_widths, [50, *old_widths])
+        self.assertEqual(manager.column_widths, [50, *old_widths[1:]])
         self.assertEqual(manager.window_preferences, {"width": 1280, "height": 650, "maximized": False})
         self.assertEqual(manager.store.get_metadata("window_preferences"), '{"width":true,"height":-4,"maximized":"yes"}')
-        manager.set_column_widths([60] * 12)
+        widths = [60 + index for index in range(11)]
+        manager.set_column_widths(widths)
+        self.assertEqual(manager.store.get_metadata("column_widths"), json.dumps(old_widths))
+        self.assertEqual(manager.store.get_metadata("column_widths_v2"), json.dumps(widths))
         manager.set_window_preferences({"width": 1000, "height": 700, "maximized": True})
         self.assertEqual(manager.window_preferences, {"width": 1000, "height": 700, "maximized": True})
         manager.close()
         self.managers.remove(manager)
         restored = DownloadManager(path, self.root / "preferences-downloads", autostart=False)
         self.managers.append(restored)
-        self.assertEqual(restored.column_widths, [60] * 12)
+        self.assertEqual(restored.column_widths, widths)
         self.assertEqual(restored.window_preferences, {"width": 1000, "height": 700, "maximized": True})
+
+    def test_width_migration_preserves_named_columns_and_v2_precedence(self):
+        legacy12 = [100 + index for index in range(12)]
+        cases = (
+            ("legacy12", None, legacy12, [legacy12[0], *legacy12[2:]]),
+            ("legacy11", None, list(range(200, 211)), [50, *range(201, 211)]),
+            ("v2", list(range(300, 311)), list(range(400, 412)), list(range(300, 311))),
+            ("invalid-v2-fallback", [True] * 11, list(range(500, 512)), [500, *range(502, 512)]),
+            ("clamped-v2", [-500, 5000, *range(40, 49)], None, [40, 2000, *range(40, 49)]),
+            ("malformed-v2-fallback", "{", list(range(600, 612)), [600, *range(602, 612)]),
+            ("bad-width-values", [None, *range(1, 11)], [True, *range(1, 12)], None),
+            ("malformed-legacy", None, "{", None),
+            ("wrong-lengths", list(range(10)), list(range(10)), None),
+            ("missing", None, None, None),
+        )
+        for name, v2, legacy, expected in cases:
+            with self.subTest(name=name):
+                path = self.root / f"{name}.sqlite3"
+                store = QueueStore(path)
+                metadata = {}
+                if v2 is not None:
+                    metadata["column_widths_v2"] = v2 if isinstance(v2, str) else json.dumps(v2)
+                if legacy is not None:
+                    metadata["column_widths"] = legacy if isinstance(legacy, str) else json.dumps(legacy)
+                store.save(metadata=metadata)
+                store.close()
+                manager = DownloadManager(path, self.root / f"{name}-downloads", autostart=False)
+                self.managers.append(manager)
+                self.assertEqual(manager.column_widths, expected)
+                manager.close()
+                self.managers.remove(manager)
+
+    def test_sort_preferences_validate_persist_by_name_and_preserve_task_fields(self):
+        path = self.root / "sort-preferences.sqlite3"
+        manager = DownloadManager(path, self.root / "sort-downloads", autostart=False)
+        self.managers.append(manager)
+        self.assertEqual(manager.sort_preferences, manager.DEFAULT_SORT_PREFERENCES)
+        manager.add(["CHK@sort/false.mp4", "CHK@sort/true.mp4", "CHK@sort/missing.mp4"])
+        identifiers = list(manager.tasks)
+        manager.tasks[identifiers[0]]["selected"] = False
+        manager.tasks[identifiers[2]].pop("selected")
+        manager.store.save(manager.tasks)
+        columns = sorted(manager.SORT_PREFERENCE_COLUMNS)
+        for column in columns:
+            for descending in (False, True):
+                for running_first in (False, True):
+                    value = {"column": column, "descending": descending,
+                             "running_first": running_first, "ignored": "extra"}
+                    manager.set_sort_preferences(value)
+                    self.assertEqual(manager.sort_preferences,
+                        {"column": column, "descending": descending, "running_first": running_first})
+                    manager.close()
+                    self.managers.remove(manager)
+                    manager = DownloadManager(path, self.root / "sort-downloads", autostart=False)
+                    self.managers.append(manager)
+                    self.assertEqual(manager.sort_preferences,
+                        {"column": column, "descending": descending, "running_first": running_first})
+        for raw in ('{', '[]', '{"column":"unknown","descending":false,"running_first":false}',
+                    '{"column":"file","descending":0,"running_first":false}',
+                    '{"column":"file","descending":true,"running_first":null}',
+                    '{}', '{"column":[],"descending":false,"running_first":false}',
+                    '{"column":true,"descending":false,"running_first":false}'):
+            manager.store.save(metadata={"sort_preferences": raw})
+            manager.close()
+            self.managers.remove(manager)
+            manager = DownloadManager(path, self.root / "sort-downloads", autostart=False)
+            self.managers.append(manager)
+            self.assertEqual(manager.sort_preferences, manager.DEFAULT_SORT_PREFERENCES)
+        self.assertFalse(manager.tasks[identifiers[0]]["selected"])
+        self.assertTrue(manager.tasks[identifiers[1]]["selected"])
+        self.assertNotIn("selected", manager.tasks[identifiers[2]])
+        manager.close()
+        self.managers.remove(manager)
+        manager = DownloadManager(path, self.root / "sort-downloads", autostart=False)
+        self.managers.append(manager)
+        self.assertFalse(manager.tasks[identifiers[0]]["selected"])
+        self.assertTrue(manager.tasks[identifiers[1]]["selected"])
+        self.assertNotIn("selected", manager.tasks[identifiers[2]])

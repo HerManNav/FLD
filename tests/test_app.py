@@ -64,7 +64,7 @@ class AppTest(unittest.TestCase):
         self.manager.add(keys)
         self.app.sync_tasks(self.manager.snapshot())
 
-    def test_paste_scrape_checkbox_download_and_remove_unstarted(self):
+    def test_paste_scrape_highlight_download_and_remove_unstarted(self):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 data = f"<p>{KEY}/first file with spaces.mp4</p><p>{KEY}/second file.zip</p>".encode()
@@ -84,8 +84,8 @@ class AppTest(unittest.TestCase):
         self.app.find_button.invoke()
         self.wait(lambda: not self.app.busy and len(self.app.rows) == 2)
         first, second = self.app.rows
-        self.assertIsInstance(self.widgets(second)["checkbox"], ttk.Checkbutton)
-        self.widgets(second)["checkbox"].invoke()
+        self.assertNotIn("Select", self.app.table.HEADINGS)
+        self.app.table.select_gesture(first)
         self.app.download_button.invoke()
         self.wait(lambda: first in self.node.jobs and self.app.rows[first]["desired"] == "running")
         self.assertNotIn(second, self.node.jobs)
@@ -102,6 +102,7 @@ class AppTest(unittest.TestCase):
     def test_start_pause_each_file_and_pause_all(self):
         self.add_keys([KEY + "/one.mp4", KEY + "/two.zip"])
         first, second = self.app.rows
+        self.app.table.select_visible(True)
         self.app.download_button.invoke()
         self.wait(lambda: len(self.node.jobs) == 2 and all(t["desired"] == "running" for t in self.app.rows.values()))
         self.widgets(first)["pause_button"].invoke()
@@ -126,7 +127,7 @@ class AppTest(unittest.TestCase):
         self.wait(lambda: self.widgets(row)["progress"].get() == 30)
         self.assertEqual(self.widgets(row)["size"].get(), f"~{len(PAYLOAD)*.3/1_000_000:.2f} / {len(PAYLOAD)/1_000_000:.2f}")
         self.assertNotIn("Blocks", self.widgets(row)["status"].get())
-        self.assertEqual(self.app.table.HEADINGS[9:], ("Progress", "Elapsed (min)", "ETA (min)"))
+        self.assertEqual(self.app.table.HEADINGS[8:], ("Progress", "Elapsed (min)", "ETA (min)"))
         self.node.fail(row, 20, fatal=True)
         self.wait(lambda: self.app.rows[row]["desired"] == "failed")
         self.app.show_details(row)
@@ -141,12 +142,12 @@ class AppTest(unittest.TestCase):
         self.wait(lambda: self.widgets(row)["progress"].get() == 40)
         self.widgets(row)["pause_button"].invoke()
         self.wait(lambda: self.node.jobs[row]["PriorityClass"] == "6")
-        self.widgets(row)["checkbox"].invoke()
+        self.app.table.select_gesture(row)
         self.close_app()
         self.open_app()
         self.wait(lambda: row in self.app.rows and self.app.rows[row]["status"] == "Paused")
         self.assertEqual(self.widgets(row)["progress"].get(), 40)
-        self.assertFalse(self.widgets(row)["checked"].get())
+        self.assertEqual(self.app.table.selected_ids, set())
         self.assertEqual(self.node.submissions, 1)
 
     def test_remove_ignores_late_page_scan_results(self):
@@ -180,7 +181,7 @@ class AppTest(unittest.TestCase):
         self.app.select_all(True)
         self.assertTrue(all(data["selected"] for data in self.app.rows.values()))
         self.root.update_idletasks()
-        self.assertLess(self.app.table.widths[2], 200)
+        self.assertLess(self.app.table.widths[1], 200)
         self.assertTrue(all(self.app.table.content.itemcget(data["bar"], "fill") == "#21ae45"
                             for data in self.app.table.visible.values()))
 
@@ -196,15 +197,99 @@ class AppTest(unittest.TestCase):
             last = list(self.app.rows)[-1]
             self.assertIn(last, table.visible)
             table.activate_row(last)
-            table.visible[last]["checkbox"].invoke()
-            self.assertFalse(self.app.rows[last]["selected"])
+            table.focus_id = last
+            table.toggle_focus()
+            self.assertIn(last, table.selected_ids)
             table.canvas.yview_moveto(0)
             table.render()
             self.assertEqual(pool_widgets, [str(widget) for slot in table.pool for widget in slot["widgets"]])
-            self.assertTrue(all(slot["checked"].get() == self.app.rows[row]["selected"] for row, slot in table.visible.items()))
-        self.assertLess(len(table.content.winfo_children()), 200)
-        self.assertEqual(len(table.canvas.winfo_children()), 4)
+            self.assertTrue(all(self.app.rows[row]["selected"] for row in table.visible))
+        self.assertEqual(len(table.controls), 3)
+        self.assertEqual(len(table.HEADINGS), 11)
         self.assertEqual(len(table.header_frame.winfo_children()), len(table.HEADINGS))
+
+    def test_passive_metric_reorders_and_width_changes_preserve_viewport(self):
+        self.add_keys([KEY + f"/Scroll {index:03d}.mp4" for index in range(150)])
+        table = self.app.table
+        self.root.deiconify()
+        self.root.update_idletasks()
+        with self.manager.lock:
+            for task in self.manager.tasks.values():
+                task["fraction"] = task["display_id"] / 151
+        for task in self.manager.snapshot():
+            table.tasks[task["id"]]["fraction"] = task["fraction"]
+        table.sort_by(8)
+        table.canvas.yview_moveto(.5)
+        self.root.update_idletasks()
+
+        def viewport_anchor():
+            y = table.canvas.canvasy(0)
+            index = min(len(table.order) - 1, int(y // table.ROW_HEIGHT))
+            return table.order[index], y - index * table.ROW_HEIGHT
+
+        first, offset = viewport_anchor()
+        for step in range(6):
+            left, right = table.order[-2:]
+            table.tasks[left]["fraction"], table.tasks[right]["fraction"] = (
+                table.tasks[right]["fraction"], table.tasks[left]["fraction"])
+            table.refresh_metric_order()
+            self.root.update_idletasks()
+            self.assertEqual(viewport_anchor()[0], first)
+            self.assertLessEqual(abs(viewport_anchor()[1] - offset), 1, f"reorder {step}")
+
+        table.activate_row(first)
+        table.pressed_cell = (first, 5, table.projection_generation)
+        table.mark_native_press(table.controls["start_button"])
+        before_yview = table.canvas.yview()
+        held = table.pressed_cell, table.native_pressed
+        table.refresh_metric_order()
+        self.assertEqual(table.canvas.yview(), before_yview)
+        self.assertEqual((table.pressed_cell, table.native_pressed), held)
+
+        original, _ = viewport_anchor()
+        column = 1
+        old_width = table.widths[column]
+        table.start_resize(SimpleNamespace(x=old_width - 1, x_root=100, y_root=40), column)
+        table.drag_resize(SimpleNamespace(x_root=old_width + 39))
+        table.end_resize(SimpleNamespace(x_root=old_width + 39, y_root=40))
+        self.root.update_idletasks()
+        self.assertEqual(viewport_anchor()[0], original)
+        self.assertLessEqual(abs(viewport_anchor()[1] - offset), 1)
+
+    def test_saved_named_sort_restores_before_projection_and_only_explicit_writes(self):
+        self.add_keys([KEY + "/alpha.mp4", KEY + "/zeta.mp4"])
+        table = self.app.table
+        rows = self.manager.snapshot()
+        rows[0]["desired"], rows[0]["status"] = "running", "Downloading"
+        rows[1]["desired"], rows[1]["status"] = "new", "Ready"
+        self.app.sync_tasks(rows)
+
+        with patch.object(self.app.actions, "put", wraps=self.app.actions.put) as enqueue:
+            table.set_running_first(True)
+            table.sort_by(1)
+            self.wait(lambda: self.manager.sort_preferences == {
+                "column": "file", "descending": False, "running_first": True})
+            saved_writes = [call.args[0][0] for call in enqueue.call_args_list]
+            self.assertIn("set_sort_preferences", saved_writes)
+            enqueue.reset_mock()
+            table.refresh_metric_order()
+            table.configure_filter("alpha")
+            table.configure_filter("")
+            table.set_widths(list(table.widths))
+            self.assertNotIn("set_sort_preferences",
+                             [call.args[0][0] for call in enqueue.call_args_list])
+
+        self.close_app()
+        self.open_app()
+        table = self.app.table
+        self.assertEqual(table.sort_preferences(), {
+            "column": "file", "descending": False, "running_first": True})
+        self.assertTrue(self.app.running_first.get())
+        restored_rows = self.manager.snapshot()
+        restored_rows[1]["desired"], restored_rows[1]["status"] = "running", "Downloading"
+        self.app.sync_tasks(restored_rows)
+        self.assertEqual([self.app.rows[row]["filename"] for row in table.order],
+                         ["zeta.mp4", "alpha.mp4"])
 
     def test_canvas_cells_work_before_hover_controls_appear(self):
         self.add_keys([KEY + "/clickable.mp4"])
@@ -217,10 +302,10 @@ class AppTest(unittest.TestCase):
             table.pointer_press(event)
             table.pointer_release(event)
         click(1)
-        self.assertFalse(self.app.rows[row]["selected"])
-        click(6)
+        self.assertEqual(table.selected_ids, {row})
+        click(5)
         self.wait(lambda: row in self.node.jobs and self.app.rows[row]["desired"] == "running")
-        click(7)
+        click(6)
         self.wait(lambda: self.app.rows[row]["desired"] == "paused")
         self.assertEqual(self.app.selected_row, row)
 
@@ -231,11 +316,11 @@ class AppTest(unittest.TestCase):
         table.activate_row(first)
         table.move_focus(1)
         self.assertEqual(table.control_row, second)
+        self.assertEqual(table.selected_ids, {second})
         table.toggle_focus()
-        self.assertFalse(self.app.rows[second]["selected"])
-        self.assertTrue(self.app.rows[first]["selected"])
+        self.assertEqual(table.selected_ids, set())
 
-    def test_keyboard_modifier_ranges_and_checkbox_space_follow_focus_uuid(self):
+    def test_keyboard_modifier_ranges_and_space_toggle_highlight(self):
         self.add_keys([KEY + f"/key-range{index}.mp4" for index in range(3)])
         table = self.app.table
         first, second, third = table.order
@@ -252,13 +337,11 @@ class AppTest(unittest.TestCase):
         table.activate_row(second)
         self.root.deiconify()
         self.root.update()
-        checkbox = table.controls["checkbox"]
-        checkbox.focus_force()
-        checkbox.event_generate("<space>")
-        self.root.update_idletasks()
-        self.assertFalse(self.app.rows[first]["selected"])
+        table.focus_id = first
+        table.toggle_focus()
+        self.assertEqual(table.selected_ids, set())
+        self.assertTrue(self.app.rows[first]["selected"])
         self.assertTrue(self.app.rows[second]["selected"])
-        self.assertEqual(table.selected_ids, {first})
 
     def test_ctrl_a_selects_visible_rows_without_changing_table_state(self):
         self.add_keys([KEY + "/visible-a.mp4", KEY + "/hidden-b.zip", KEY + "/visible-c.jpg"])
@@ -335,12 +418,12 @@ class AppTest(unittest.TestCase):
         self.wait(lambda: self.manager.column_widths is not None and self.manager.column_widths[2] == original + 100)
         self.close_app()
         self.open_app()
-        self.assertEqual(len(self.manager.column_widths), 12)
+        self.assertEqual(len(self.manager.column_widths), 11)
         self.assertEqual(self.app.table.widths[2], original + 100)
-        self.assertEqual(self.app.table.HEADINGS[10:], ("Elapsed (min)", "ETA (min)"))
+        self.assertEqual(self.app.table.HEADINGS[9:], ("Elapsed (min)", "ETA (min)"))
         table = self.app.table
-        self.assertGreaterEqual(table.natural_widths[10], table.text_font.measure("Elapsed (min)") + 12)
-        self.assertGreaterEqual(table.natural_widths[11], table.text_font.measure("ETA (min)") + 12)
+        self.assertGreaterEqual(table.natural_widths[9], table.text_font.measure("Elapsed (min)") + 12)
+        self.assertGreaterEqual(table.natural_widths[10], table.text_font.measure("ETA (min)") + 12)
         table.autosize(SimpleNamespace(x=table.widths[2] - 1), 2)
         self.assertEqual(table.widths[2], table.natural_widths[2])
 
@@ -497,7 +580,7 @@ class AppTest(unittest.TestCase):
         table = self.app.table
         rows = self.manager.snapshot()
         self.assertEqual([self.app.rows[row]["display_id"] for row in table.order], [1, 2, 3, 4])
-        table.sort_by(2)
+        table.sort_by(1)
         self.assertEqual([self.app.rows[row]["filename"] for row in table.order],
                          ["file10.mp4", "File2.jpg", "notes.txt", "Photo.JPG"])
         self.app.filter_text.set(r"\.jpg$")
@@ -518,15 +601,17 @@ class AppTest(unittest.TestCase):
         self.app.filter_text.set("")
         self.app.apply_filter()
         self.assertEqual(len(table.order), 4)
-        self.assertEqual(str(self.app.download_button["state"]), "normal")
+        self.assertEqual(str(self.app.download_button["state"]), "disabled")
         self.assertEqual(self.app.status.get(), "4 files: 0 running, 0 paused, 0 complete. Queue saved automatically.")
+        table.select_visible(True)
+        self.assertEqual(str(self.app.download_button["state"]), "normal")
         self.app.filter_text.set(r"\.jpg$")
         self.app.apply_filter()
         self.app.select_all(False)
         hidden = next(row for row in self.app.rows if row not in table.order)
         self.assertTrue(self.app.rows[hidden]["selected"])
         first = table.order[0]
-        self.widgets(first)["checkbox"].invoke()
+        table.select_gesture(first)
         self.app.download()
         self.wait(lambda: self.app.rows[first]["desired"] == "running")
         self.assertEqual(self.app.rows[hidden]["desired"], "new")
@@ -547,16 +632,15 @@ class AppTest(unittest.TestCase):
         table.set_row_selection({third}, third, third)
         table.select_gesture(first, shift=True)
         self.assertEqual(table.selected_ids, {first, second, third})
-        checkbox = self.widgets(first)["checkbox"]
-        checkbox.invoke()
         self.assertEqual(table.selected_ids, {first, second, third})
-        table.sort_by(2)
+        self.assertTrue(all(self.app.rows[row]["selected"] for row in (first, second, third)))
+        table.sort_by(1)
         table.configure_filter("highlight[12]")
         self.assertEqual(table.selected_ids, {first, second, third})
         self.assertEqual(set(table.selected_visible_ids()), {second, third})
         table.configure_filter("")
         self.assertEqual(set(table.selected_visible_ids()), {first, second, third})
-        self.assertFalse(self.app.rows[first]["selected"])
+        self.assertTrue(self.app.rows[first]["selected"])
         self.assertTrue(self.app.rows[second]["selected"])
         self.assertTrue(self.app.rows[third]["selected"])
 
@@ -772,7 +856,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual([self.app.rows[row]["display_id"] for row in table.order], [2, 3, 1, 4])
         table.sort_by(10)
         self.assertEqual(self.app.rows[table.order[-1]]["display_id"], 4)
-        table.sort_by(9)
+        table.sort_by(8)
         focused = table.order[0]
         table.activate_row(focused)
         table.pressed_cell = (focused, 6, table.projection_generation)
@@ -801,7 +885,7 @@ class AppTest(unittest.TestCase):
         table.activate_row(row)
         press = SimpleNamespace(x=table.widths[1] + 2, y=table.ROW_HEIGHT / 2)
         table.pointer_press(press)
-        table.sort_by(2)
+        table.sort_by(1)
         generation = table.projection_generation
         release = SimpleNamespace(x=press.x, y=press.y)
         table.pointer_release(release)

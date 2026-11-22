@@ -20,6 +20,8 @@ from .queue_store import QueueStore
 
 class DownloadManager:
     DEFAULT_WINDOW_PREFERENCES = {"width": 1280, "height": 650, "maximized": False}
+    DEFAULT_SORT_PREFERENCES = {"column": "id", "descending": False, "running_first": False}
+    SORT_PREFERENCE_COLUMNS = {"id", "file", "size", "speed", "status", "progress", "elapsed", "eta"}
 
     def __init__(self, state_path=STATE_PATH, directory=DOWNLOAD_DIR, host="127.0.0.1", port=9481,
                  notify=lambda tasks: None, autostart=True, reconnect_delay=1, web_base="http://127.0.0.1:8888"):
@@ -28,7 +30,9 @@ class DownloadManager:
         self.parts = self.directory / ".fld-parts"
         self.parts.mkdir(parents=True, exist_ok=True)
         self.tasks = self.store.load()
-        self.column_widths = self._load_column_widths(self.store.get_metadata("column_widths"))
+        self.column_widths = self._load_column_widths(
+            self.store.get_metadata("column_widths_v2"), self.store.get_metadata("column_widths"))
+        self.sort_preferences = self._valid_sort_preferences(self.store.get_metadata("sort_preferences"))
         self.window_preferences = self._valid_window_preferences(self.store.get_metadata("window_preferences"))
         self._migrate_tasks()
         for task in self.tasks.values():
@@ -63,20 +67,50 @@ class DownloadManager:
             self.thread.start()
 
     @staticmethod
-    def _load_column_widths(raw):
+    def _load_column_widths(raw_v2, raw_legacy):
+        widths = DownloadManager._valid_width_array(raw_v2, 11)
+        if widths is not None:
+            return widths
+        old = DownloadManager._valid_width_array(raw_legacy, (11, 12))
+        if old is None:
+            return None
+        if len(old) == 12:
+            return [old[0], *old[2:]]
+        return [50, *old[1:]]
+
+    @staticmethod
+    def _valid_width_array(raw, lengths):
         if raw is None:
             return None
         try:
             widths = json.loads(raw)
-            if not isinstance(widths, list):
+            if (not isinstance(widths, list) or len(widths) not in
+                    ({lengths} if isinstance(lengths, int) else set(lengths))):
                 return None
-            if len(widths) == 11:
-                widths = [50, *widths]
-            if len(widths) != 12 or any(isinstance(value, bool) or not isinstance(value, int) for value in widths):
+            if any(isinstance(value, bool) or not isinstance(value, int) for value in widths):
                 return None
             return [max(40, min(2000, value)) for value in widths]
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
+
+    @classmethod
+    def _valid_sort_preferences(cls, raw):
+        defaults = dict(cls.DEFAULT_SORT_PREFERENCES)
+        if raw is None:
+            return defaults
+        try:
+            value = json.loads(raw) if isinstance(raw, str) else raw
+            if not isinstance(value, dict):
+                return defaults
+            column = value.get("column")
+            descending = value.get("descending")
+            running_first = value.get("running_first")
+            if (column not in cls.SORT_PREFERENCE_COLUMNS or
+                    not isinstance(descending, bool) or not isinstance(running_first, bool)):
+                return defaults
+            return {"column": column, "descending": descending, "running_first": running_first}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return defaults
 
     @classmethod
     def _valid_window_preferences(cls, raw):
@@ -150,6 +184,12 @@ class DownloadManager:
             self.store.save(metadata={"window_preferences": json.dumps(value)})
             self.window_preferences = value
 
+    def set_sort_preferences(self, preferences):
+        value = self._valid_sort_preferences(preferences)
+        with self.lock:
+            self.store.save(metadata={"sort_preferences": json.dumps(value)})
+            self.sort_preferences = value
+
     def snapshot(self):
         with self.lock:
             return copy.deepcopy([task for task in self.tasks.values() if task["desired"] != "removed"])
@@ -188,28 +228,13 @@ class DownloadManager:
             self.last_notify = self.last_save
         self.wake.set()
 
-    def select(self, identifier, selected):
-        self.select_many([identifier], selected)
-
-    def select_many(self, identifiers, selected):
-        with self.lock:
-            changed = False
-            for identifier in identifiers:
-                task = self.tasks.get(identifier)
-                if task is not None and task["desired"] != "removed" and task["selected"] != bool(selected):
-                    task["selected"] = bool(selected)
-                    changed = True
-            if not changed:
-                return
-            self.dirty = True
-            self.checkpoint(True)
-
     def set_column_widths(self, widths):
-        if len(widths) != 12:
+        if (not isinstance(widths, (list, tuple)) or len(widths) != 11 or
+                any(isinstance(value, bool) or not isinstance(value, int) for value in widths)):
             raise ValueError("Unexpected number of list columns.")
-        widths = [max(40, min(2000, int(value))) for value in widths]
+        widths = [max(40, min(2000, value)) for value in widths]
         with self.lock:
-            self.store.save(metadata={"column_widths": json.dumps(widths)})
+            self.store.save(metadata={"column_widths_v2": json.dumps(widths)})
             self.column_widths = widths
 
     def action(self, identifiers, desired):

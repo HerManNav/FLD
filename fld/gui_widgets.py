@@ -23,16 +23,19 @@ class CanvasValue:
 
 
 class DownloadList(ttk.Frame):
-    """Virtualized rows, one fixed header, and four shared native controls."""
+    """Virtualized rows, one fixed header, and three shared native controls."""
 
-    HEADINGS = ("ID", "Select", "File", "Done / Size (MB)", "MB/s", "Status", "Start", "Pause", "Cancel", "Progress", "Elapsed (min)", "ETA (min)")
-    SORTABLE = {0, 2, 3, 4, 5, 9, 10, 11}
-    TEXT_SORT = {2, 5}
-    DEFAULT_WIDTHS = (50, 42, 180, 142, 76, 150, 58, 58, 58, 130, 72, 72)
+    HEADINGS = ("ID", "File", "Done / Size (MB)", "MB/s", "Status", "Start", "Pause", "Cancel", "Progress", "Elapsed (min)", "ETA (min)")
+    SORTABLE = {0, 1, 2, 3, 4, 8, 9, 10}
+    TEXT_SORT = {1, 4}
+    COLUMN_NAMES = {0: "id", 1: "file", 2: "size", 3: "speed", 4: "status", 8: "progress", 9: "elapsed", 10: "eta"}
+    NAME_COLUMNS = {name: column for column, name in COLUMN_NAMES.items()}
+    DEFAULT_WIDTHS = (50, 180, 142, 76, 150, 58, 58, 58, 130, 72, 72)
     ROW_HEIGHT, HEADER_HEIGHT = 32, 28
 
     def __init__(self, parent, action, details, widths_changed=lambda widths: None,
-                 selection_changed=lambda: None, delete_selected=lambda: None):
+                 selection_changed=lambda: None, delete_selected=lambda: None,
+                 sort_changed=lambda preferences: None):
         super().__init__(parent)
         self.text_font = font.nametofont("TkDefaultFont", root=self.winfo_toplevel())
         self.fit_cache = {}
@@ -40,6 +43,7 @@ class DownloadList(ttk.Frame):
         self.HEADER_HEIGHT = max(28, self.text_font.metrics("linespace") + 12)
         self.action, self.details, self.widths_changed = action, details, widths_changed
         self.selection_changed, self.delete_selected = selection_changed, delete_selected
+        self.sort_changed = sort_changed
         self.selected_ids, self.anchor_id, self.focus_id = set(), None, None
         self.user_widths = None
         self.resizing = self.resize_id = self.render_id = self.scroll_id = None
@@ -84,8 +88,7 @@ class DownloadList(ttk.Frame):
                         for heading in self.HEADINGS]
         for widget in (self, self.header_frame, self.canvas, *self.headers):
             self.tag_widget(widget)
-        self.checkbox_value = tk.BooleanVar(master=self)
-        self.controls = {"checkbox": ttk.Checkbutton(self.canvas, variable=self.checkbox_value, command=self.select_control)}
+        self.controls = {}
         self.context_menu = tk.Menu(self, tearoff=False)
         self.context_menu.add_command(label="Delete selected", command=self.delete_selected)
         for name in ("start", "pause", "cancel"):
@@ -99,13 +102,10 @@ class DownloadList(ttk.Frame):
             widget.bind("<Control-a>", self.keyboard_select_all)
             widget.bind("<Control-A>", self.keyboard_select_all)
             widget.bind("<Button-3>", self.context_press)
-            if widget is self.controls["checkbox"]:
-                widget.bind("<space>", lambda event: self.toggle_focus())
             widget.bind("<Motion>", self.pointer_motion)
             widget.bind("<Enter>", self.pointer_motion)
-            if widget is not self.controls["checkbox"]:
-                widget.bind("<ButtonPress-1>", lambda event, widget=widget: self.mark_native_press(widget))
-                widget.bind("<ButtonRelease-1>", self.schedule_native_release)
+            widget.bind("<ButtonPress-1>", lambda event, widget=widget: self.mark_native_press(widget))
+            widget.bind("<ButtonRelease-1>", self.schedule_native_release)
         self.canvas.bind("<Motion>", self.pointer_motion)
         self.canvas.bind("<Leave>", self.defer_hover_clear)
         self.canvas.bind("<Button-1>", self.pointer_press)
@@ -212,10 +212,10 @@ class DownloadList(ttk.Frame):
             self.filename_widths = {task["filename"]: self.text_font.measure(task["filename"]) + 12
                                     for task in self.tasks.values()}
             widths = list(self.DEFAULT_WIDTHS)
-            widths[2] = min(280, max([60, *self.filename_widths.values()]))
+            widths[1] = min(280, max([60, *self.filename_widths.values()]))
             widths[0] = max(50, self.text_font.measure(self.HEADINGS[0]) + 12)
             self.natural_widths = tuple(max(width, self.text_font.measure(self.heading_text(index)) +
-                                            (24 if index in (6, 7, 8) else 12))
+                                            (24 if index in (5, 6, 7) else 12))
                                         for index, width in enumerate(widths))
         self.widths = tuple(self.user_widths or self.natural_widths)
         self.update_scrollregion()
@@ -227,9 +227,8 @@ class DownloadList(ttk.Frame):
 
     def move_to_y(self, y):
         region_height = max(self.canvas.winfo_height(), len(self.order) * self.ROW_HEIGHT, 1)
-        maximum = max(0, region_height - self.canvas.winfo_height())
-        y = min(maximum, max(0, y))
-        self.canvas.yview_moveto(y / max(1, maximum))
+        y = min(max(0, region_height - self.canvas.winfo_height()), max(0, y))
+        self.canvas.yview_moveto(y / region_height)
 
     def position_viewport(self, force=False):
         if not self.widths:
@@ -333,8 +332,9 @@ class DownloadList(ttk.Frame):
             self.descending = not self.descending
         else:
             self.sort_column = column
-            self.descending = column not in self.TEXT_SORT and column not in (0, 11)
+            self.descending = column not in self.TEXT_SORT and column not in (0, 10)
         self.rebuild_projection(force_top=True)
+        self.emit_sort_preferences()
 
     def configure_filter(self, pattern):
         try:
@@ -351,26 +351,39 @@ class DownloadList(ttk.Frame):
             return
         self.running_first = enabled
         if enabled:
-            self.sort_column, self.descending = 9, True
+            self.sort_column, self.descending = 8, True
         self.rebuild_projection(force_top=True)
+        self.emit_sort_preferences()
+
+    def sort_preferences(self):
+        return {"column": self.COLUMN_NAMES[self.sort_column], "descending": self.descending,
+                "running_first": self.running_first}
+
+    def emit_sort_preferences(self):
+        self.sort_changed(self.sort_preferences())
+
+    def restore_sort_preferences(self, preferences):
+        self.sort_column = self.NAME_COLUMNS.get(preferences.get("column"), 0)
+        self.descending = preferences.get("descending", False)
+        self.running_first = preferences.get("running_first", False)
 
     def sort_value(self, task, now):
         column = self.sort_column
         if column == 0:
             return task.get("display_id", 0)
-        if column == 2:
+        if column == 1:
             return task["filename"].casefold()
-        if column == 3:
+        if column == 2:
             return (task.get("size"), task.get("fetched", 0))
-        if column == 4:
+        if column == 3:
             return task.get("speed", 0) if task.get("desired") == "running" else 0
-        if column == 5:
+        if column == 4:
             return re.sub(r"\s+\([0-9.]+%\)$", "", task.get("status", "")).casefold()
-        if column == 9:
+        if column == 8:
             return min(1.0, max(0.0, task.get("fraction", 0)))
-        if column == 10:
+        if column == 9:
             return elapsed_seconds(task, now) if task.get("timer_known", True) else None
-        if column == 11:
+        if column == 10:
             return remaining_seconds(task)
         return task.get("display_id", 0)
 
@@ -396,7 +409,7 @@ class DownloadList(ttk.Frame):
         known, unknown = [], []
         for task in visible:
             value = self.sort_value(task, now)
-            is_unknown = value is None or (self.sort_column == 3 and value[0] is None)
+            is_unknown = value is None or (self.sort_column == 2 and value[0] is None)
             (unknown if is_unknown else known).append((task, value))
         known.sort(key=lambda pair: pair[0].get("display_id", 0))
         known.sort(key=lambda pair: pair[1], reverse=self.descending)
@@ -447,8 +460,6 @@ class DownloadList(ttk.Frame):
                             for identifier, task in updated.items())
         state_changed = any(previous.get(identifier, {}).get("desired") != task.get("desired")
                             for identifier, task in updated.items())
-        selected_changed = any(previous.get(identifier, {}).get("selected") != task.get("selected")
-                               for identifier, task in updated.items())
         self.tasks = updated
         old_selection = set(self.selected_ids)
         self.selected_ids.intersection_update(updated)
@@ -465,13 +476,11 @@ class DownloadList(ttk.Frame):
             self.rebuild_projection(preserve=True)
         elif state_changed:
             self.rebuild_projection(preserve=True)
-        elif selected_changed:
-            self.render(refresh=True)
         else:
             self.render()
 
     def refresh_metric_order(self):
-        if self.sort_column in {3, 4, 9, 10, 11} or self.running_first:
+        if self.sort_column in {2, 3, 8, 9, 10} or self.running_first:
             self.rebuild_projection(preserve=True)
         else:
             self.render(refresh=True)
@@ -480,9 +489,6 @@ class DownloadList(ttk.Frame):
         slot = {"id": None, "cache": {}, "shown": False, "widgets": []}
         tag = "row" + str(len(self.pool))
         slot["background"] = self.canvas.create_rectangle(0, 0, 0, 0, fill="white", outline="#eeeeee", tags=tag)
-        slot["check_box"] = self.canvas.create_rectangle(0, 0, 0, 0, fill="white", outline="#888888", tags=tag)
-        slot["check_tick"] = self.canvas.create_line(0, 0, 0, 0, 0, 0, fill="white", width=2, tags=tag)
-        slot["checked"] = CanvasValue(False, lambda value: self.paint_check(slot, value))
         for name in ("display_id", "filename", "size", "speed", "status", "elapsed", "eta"):
             slot[name + "_item"] = self.canvas.create_text(0, 0, anchor="w", font=self.text_font,
                                                             fill="#202020", tags=tag)
@@ -494,7 +500,7 @@ class DownloadList(ttk.Frame):
         slot["track"] = self.canvas.create_rectangle(0, 0, 0, 0, fill="#eeeeee", outline="#999999", tags=tag)
         slot["bar"] = self.canvas.create_rectangle(0, 0, 0, 0, fill="#21ae45", outline="", tags=tag)
         slot["progress"] = CanvasValue(0, lambda value: self.paint_progress(slot, value))
-        slot["graphics"] = [slot["background"], slot["track"], slot["bar"], slot["check_box"], slot["check_tick"],
+        slot["graphics"] = [slot["background"], slot["track"], slot["bar"],
                             *[slot[name + suffix] for name in ("start", "pause", "cancel") for suffix in ("_box", "_text")],
                             *[slot[name + "_item"] for name in ("display_id", "filename", "size", "speed", "status", "elapsed", "eta")]]
         self.pool.append(slot)
@@ -530,10 +536,6 @@ class DownloadList(ttk.Frame):
             filled = (right - left - 2) * min(1, max(0, value / 100))
             self.canvas.coords(slot["bar"], left + 1, top + 1, left + 1 + filled, bottom - 1)
 
-    def paint_check(self, slot, checked):
-        self.canvas.itemconfigure(slot["check_box"], fill="#0067c0" if checked else "white")
-        self.canvas.itemconfigure(slot["check_tick"], state="normal" if checked and slot["shown"] else "hidden")
-
     def position_slot(self, slot, index):
         y = index * self.ROW_HEIGHT
         xs, total = [], 0
@@ -542,35 +544,23 @@ class DownloadList(ttk.Frame):
             total += width
         self.canvas.coords(slot["background"], 0, y, total, y + self.ROW_HEIGHT)
         self.canvas.itemconfigure(slot["background"], fill=self.row_background(slot["id"], index))
-        cx, cy = xs[1] + self.widths[1] / 2, y + self.ROW_HEIGHT / 2
-        self.canvas.coords(slot["check_box"], cx - 7, cy - 7, cx + 7, cy + 7)
-        self.canvas.coords(slot["check_tick"], cx - 4, cy, cx - 1, cy + 3, cx + 4, cy - 3)
-        for name, column in (("start", 6), ("pause", 7), ("cancel", 8)):
+        cx, cy = xs[0] + self.widths[0] / 2, y + self.ROW_HEIGHT / 2
+        for name, column in (("start", 5), ("pause", 6), ("cancel", 7)):
             self.canvas.coords(slot[name + "_box"], xs[column] + 4, y + 3, xs[column] + self.widths[column] - 4, y + self.ROW_HEIGHT - 3)
             self.canvas.coords(slot[name + "_text"], xs[column] + self.widths[column] / 2, cy)
         slot["text_widths"] = {}
-        for name, column in (("display_id", 0), ("filename", 2), ("size", 3), ("speed", 4),
-                             ("status", 5), ("elapsed", 10), ("eta", 11)):
+        for name, column in (("display_id", 0), ("filename", 1), ("size", 2), ("speed", 3),
+                             ("status", 4), ("elapsed", 9), ("eta", 10)):
             slot["text_widths"][name] = self.widths[column] - 10
             self.canvas.coords(slot[name + "_item"], xs[column] + 5, cy)
             self.paint_text(slot, name, slot[name].get())
-        slot["progress_area"] = xs[9] + 5, y + 8, xs[9] + self.widths[9] - 5, y + self.ROW_HEIGHT - 8
+        slot["progress_area"] = xs[8] + 5, y + 8, xs[8] + self.widths[8] - 5, y + self.ROW_HEIGHT - 8
         self.canvas.coords(slot["track"], *slot["progress_area"])
         self.paint_progress(slot, slot["progress"].get())
         if not slot["shown"]:
             for item in slot["graphics"]:
                 self.canvas.itemconfigure(item, state="normal")
             slot["shown"] = True
-            self.paint_check(slot, slot["checked"].get())
-
-    def select_control(self):
-        slot = self.visible.get(self.control_row)
-        if slot is None or slot["id"] != self.control_row or self.control_row not in self.order_index:
-            return
-        checked = self.checkbox_value.get()
-        slot["checked"].set(checked)
-        slot["cache"]["checked"] = checked
-        self.action("select", slot["id"], checked)
 
     def invoke_control(self, name):
         row = self.control_row
@@ -632,14 +622,11 @@ class DownloadList(ttk.Frame):
         for width in self.widths:
             xs.append(x)
             x += width
-        for name, column in (("checkbox", 1), ("start_button", 6), ("pause_button", 7), ("cancel_button", 8)):
-            position = ((xs[column] + (self.widths[column] - 22) / 2, y + 3, 22, self.ROW_HEIGHT - 6)
-                        if name == "checkbox" else (xs[column] + 4, y + 3, self.widths[column] - 8, self.ROW_HEIGHT - 6))
+        for name, column in (("start_button", 5), ("pause_button", 6), ("cancel_button", 7)):
+            position = (xs[column] + 4, y + 3, self.widths[column] - 8, self.ROW_HEIGHT - 6)
             if getattr(self.controls[name], "_fld_position", None) != position or not self.controls[name].place_info():
                 self.controls[name].place(x=position[0], y=position[1], width=position[2], height=position[3])
                 self.controls[name]._fld_position = position
-        if self.checkbox_value.get() != task["selected"]:
-            self.checkbox_value.set(task["selected"])
         for name, enabled in (("start", task["desired"] not in {"running", "done"}),
                               ("pause", task["desired"] == "running"),
                               ("cancel", task["desired"] in {"running", "paused", "failed"})):
@@ -779,6 +766,15 @@ class DownloadList(ttk.Frame):
             self.paint_selection_change(before | self.selected_ids)
         return "break"
 
+    def select_visible(self, selected):
+        before = set(self.selected_ids)
+        if selected:
+            self.selected_ids.update(self.order)
+        else:
+            self.selected_ids.difference_update(self.order)
+        if before != self.selected_ids:
+            self.paint_selection_change(before | self.selected_ids)
+
     def defer_hover_clear(self, event=None):
         if getattr(self, "hover_clear_id", None) is not None:
             self.after_cancel(self.hover_clear_id)
@@ -810,7 +806,7 @@ class DownloadList(ttk.Frame):
                     self.set_row_selection(set(), None, None)
             else:
                 self.activate_row(row)
-                name = {1: "checkbox", 6: "start_button", 7: "pause_button", 8: "cancel_button"}.get(column)
+                name = {5: "start_button", 6: "pause_button", 7: "cancel_button"}.get(column)
                 if name:
                     self.controls[name].invoke()
                 else:
@@ -876,17 +872,16 @@ class DownloadList(ttk.Frame):
         return "break"
 
     def toggle_focus(self):
-        row = self.focus_id if self.focus_id in self.visible else self.control_row
+        row = self.focus_id if self.focus_id in self.visible else None
         if row in self.visible:
-            self.activate_row(row)
-            self.controls["checkbox"].invoke()
+            self.select_gesture(row, control=True)
         return "break"
 
     def update_slot(self, slot, task, now):
         active, done = task["desired"] == "running", task["desired"] == "done"
         total = task["size"]
         size = "Unknown" if total is None else ("" if done else "~") + f"{task['fetched']/1_000_000:.2f} / " + ("" if task["size_final"] else "~") + f"{total/1_000_000:.2f}"
-        values = dict(checked=task["selected"], display_id=task.get("display_id", ""), filename=task["filename"], size=size,
+        values = dict(display_id=task.get("display_id", ""), filename=task["filename"], size=size,
                       speed=f"~{task['speed']/1_000_000:.2f}" if active else "0.00", progress=100*task["fraction"],
                       status=task["status"] + (f" ({100*task['fraction']:.1f}%)" if active else ""),
                       elapsed=clock_text(elapsed_seconds(task, now)) if task.get("timer_known", True) else "--:--",

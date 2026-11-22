@@ -11,6 +11,11 @@ Their completed source checks and refreshed demo are recorded in the
 [release verification](release-design.md#verification-results); the historical
 95-test results below remain the previous selection/icon baseline.
 
+The [list-fixes contract](list-fixes-design.md) supersedes this document's old
+download-checkbox selection, four-control, and session-only sorting rules.
+Those statements describe pre-v0.1.1 behavior; current list acceptance is
+tracked by the linked contract.
+
 ## Owners and boundaries
 
 - `fld/gui_widgets.py`: transient row selection, pointer and keyboard handling,
@@ -29,14 +34,14 @@ Their completed source checks and refreshed demo are recorded in the
 
 Read the feature-map links for rendering, hover, filtering, removal, persistence,
 and local-node recovery before implementation. Do not change parser behavior,
-column order, tray lifecycle, file naming, or existing download checkbox scope.
+tray lifecycle, file naming, or local-node ownership.
 
-## Two independent selections
+## Current highlight scope and legacy payload
 
-The existing `task['selected']` boolean is the persisted **download checkbox**.
-Select all, Select none, Download selected, Space, and the row checkbox retain
-their current meanings. Clicking or extending a row highlight must never write
-that boolean or call `manager.select`/`select_many`.
+Current row highlights are transient UUID session state and the sole active
+selection for Download selected and Delete selected. The legacy
+`task['selected']` payload field remains untouched for older readers. New tasks
+may retain its compatibility default, but the current GUI never reads it.
 
 Add transient DownloadList state: `selected_ids` (UUID set), `anchor_id`, and
 `focus_id`. These are separate from hover, the shared native-control target,
@@ -61,9 +66,9 @@ the new current order. Range endpoints are inclusive.
 ## Pointer and keyboard contract
 
 Apply row gestures to non-control cells, including ID, filename, metrics, status,
-and unused horizontal space on a valid row. Keep checkbox and Start/Pause/Cancel
-cells independent: they act on their one UUID without replacing row highlights.
-Both painted fallback cells and native overlays must follow this rule.
+and unused horizontal space on a valid row. Start/Pause/Cancel cells act on their
+one UUID without replacing row highlights. Both painted fallback cells and
+native overlays must follow this rule.
 
 | Gesture | Row highlight and anchor behavior |
 | --- | --- |
@@ -75,19 +80,18 @@ Both painted fallback cells and native overlays must follow this rule.
 | Ctrl+Up/Down | Move focus only; retain highlights and anchor. |
 | Shift+Up/Down | Move focus and replace highlights with anchor-to-target range. |
 | Ctrl+Shift+Up/Down | Move focus and add anchor-to-target range. |
-| Ctrl+A | Add all currently visible UUIDs to highlights; preserve hidden selections, anchor, focus, details, viewport, and download checkboxes. |
-| Space | Toggle focused row's existing download checkbox; leave highlights unchanged. |
+| Ctrl+A | Add all currently visible UUIDs to highlights; preserve hidden selections, anchor, focus, details, and viewport. |
+| Space | Toggle focused row's highlight; set it as anchor. |
 | Delete | Invoke the same confirmed selected-deletion path as the button. |
 
-Arrow bindings work on the canvas and all four shared controls, scroll the target
+Arrow bindings work on the canvas and all three shared controls, scroll the target
 into view, show its controls, and update details. With no visible focused UUID,
 Down begins at the first visible row and Up at the last. Plain movement at an
 edge retains that row. Hover must never change `focus_id`, anchor, or highlights.
 Do not add root-level Delete bindings that intercept editing in source/filter
-entries. Canvas and native-checkbox Space use the focused UUID even when hover
-moved the shared overlay to another row; toggle once and suppress the checkbox
-class binding. Native Start/Pause/Cancel buttons retain normal Space activation.
-Ctrl+A follows the same canvas/four-control binding scope. It has no root/global
+entries. Canvas Space uses focused UUID even when hover moved the shared overlay
+to another row; toggle once. Native Start/Pause/Cancel buttons retain normal
+Space activation. Ctrl+A follows the same canvas/three-control binding scope. It has no root/global
 binding and preserves source/filter entry text selection. Empty visible scope
 is a no-op. See the [extension contract](release-design.md#ctrla-row-highlights).
 
@@ -119,7 +123,8 @@ so moving the pointer away cannot erase a selected background. Repaint only
 affected visible backgrounds after selection changes; do not trigger sorting,
 full filename measurement, or row widget creation.
 
-Keep exactly four shared native row controls. One shared context menu is allowed;
+The current list-fixes contract requires three shared native row controls.
+Historically, this document required four. One shared context menu is allowed;
 there is no per-row menu or widget. At a 360px viewport keep at most 15 canvas
 slots. Existing recycled-slot identity and native press validation still apply.
 
@@ -134,8 +139,9 @@ between adjacent buttons and about 4px between the two rows. Two shared layout
 frames are sufficient; no responsive breakpoint or resize handler is needed.
 The added completed cleanup button requires a fresh production minimum-width
 measurement; the historical results below covered the previous two-button row.
-Enable Delete selected only when at least one
-selected visible UUID exists and the app is neither exiting nor already showing
+Enable Download selected only when a highlighted visible non-done UUID exists.
+Enable Delete selected only when at least one selected visible UUID exists and
+the app is neither exiting nor already showing
 or processing a selected-deletion confirmation. Completed rows are eligible.
 The menu and Delete key use identical guards. No selection is a harmless no-op.
 
@@ -167,8 +173,8 @@ action-worker `delete_tasks` branch emitting `delete_done` with accepted UUIDs
 after the durable manager call succeeds. Process `delete_done`, like
 `remove_done`, before scan-generation filtering. Record all acknowledged UUIDs
 in App.removed_ids before applying any coalesced snapshot, including a stale
-snapshot from earlier in that poll. Clear only those pending checkbox intentions,
-row highlights, anchors/focus, and detail identities. Re-added keys have fresh
+snapshot from earlier in that poll. Clear row highlights, anchors/focus, and
+detail identities. Re-added keys have fresh
 UUIDs and remain visible. Acknowledged zero-result deletion is valid.
 
 After updating rows report **Removed N selected task(s). Completed files were

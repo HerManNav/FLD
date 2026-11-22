@@ -6,7 +6,7 @@ FLD finds Freenet links on a page and manages downloads through your local Freen
 
 ## Start
 
-For the standalone app, download [**FLD.exe** from release v0.1.0](https://github.com/HerManNav/FLD/releases/tag/v0.1.0), place it in a writable folder, and double-click it. Python is not required.
+For the standalone app, download [**FLD.exe** from release v0.1.1](https://github.com/HerManNav/FLD/releases/tag/v0.1.1), place it in a writable folder, and double-click it. Python is not required.
 
 For a source checkout, double-click **Start FLD.bat**, or run `python app.py` from this folder. Python with Tkinter is required; FLD has no pip dependencies.
 
@@ -15,12 +15,11 @@ Keep Freenet running with FCP enabled at `127.0.0.1:9481`; its local web interfa
 ## Download files
 
 1. Paste an HTTP/HTTPS page URL, a Freenet page URL, or a Freenet key. Click **Find links**.
-2. Select files with their checkboxes. **Select all**, **Select none**, and **Download selected** apply to visible rows while filtering.
-3. Highlight rows with a click; use Ctrl-click to toggle rows or Shift-click to extend a range. Ctrl+A highlights all visible rows. Arrow keys move the highlight; Space still toggles the download checkbox.
-4. Click **Download selected**, or use a row's **Start**, **Pause**, and **Cancel** buttons.
-5. Use **Delete selected** or right-click a row and choose **Delete selected** to remove highlighted rows after confirmation. **Remove completed** clears completed history across the queue; downloaded files stay on disk. **Remove unstarted** keeps its separate queue-wide meaning.
-6. Use the filename regex field to filter the list, such as `\.jpg$`. Click sortable column headers to change order. **Running first** stays on across sorts and groups active tasks by progress. Turn it off and sort **ID** ascending (▲) to restore scrape order.
-7. Click **Open download folder** to see saved files.
+2. Highlight rows with a click; use Ctrl-click to toggle rows or Shift-click to extend a range. **Select all**, **Select none**, and Ctrl+A apply to visible rows while filtering.
+3. Click **Download selected** to start highlighted visible files, or use a row's **Start**, **Pause**, and **Cancel** buttons. Column sorting is saved across restarts.
+4. Use **Delete selected** or right-click a row and choose **Delete selected** to remove highlighted rows after confirmation. **Remove completed** clears completed history across the queue; downloaded files stay on disk. **Remove unstarted** keeps its separate queue-wide meaning.
+5. Use the filename regex field to filter the list, such as `\.jpg$`. Click sortable column headers to change order. **Running first** stays on across sorts and groups active tasks by progress. Turn it off and sort **ID** ascending (▲) to restore scrape order.
+6. Click **Open download folder** to see saved files.
 
 Files go in `downloads` beside `app.py` for source runs, or beside `FLD.exe` for standalone runs. The queue database is stored in the same folder. Move the executable beside an existing queue to reuse it; FLD does not copy or migrate queues. Use a writable folder. Existing files are not overwritten; duplicate names get a number suffix.
 

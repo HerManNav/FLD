@@ -148,8 +148,14 @@ def run(report_path):
             "table": hasattr(app, "table"),
             "status": hasattr(app, "status"),
         }
+        report["column_headings"] = list(app.table.HEADINGS)
+        report["shared_row_controls"] = len(app.table.controls)
+        report["no_select_heading"] = "Select" not in app.table.HEADINGS
         if not all(report["controls"].values()):
             raise RuntimeError("Expected production controls are missing.")
+        if (len(app.table.HEADINGS) != 11 or not report["no_select_heading"] or
+                report["shared_row_controls"] != 3):
+            raise RuntimeError("List does not have 11 headings and three shared row controls.")
         report["worker_started"] = app.action_thread.is_alive()
         if not report["worker_started"]:
             raise RuntimeError("Action worker did not start.")

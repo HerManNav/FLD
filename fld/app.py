@@ -63,7 +63,7 @@ class App:
         self.events, self.actions = queue.Queue(), queue.Queue()
         self.cancel = threading.Event()
         self.generation, self.busy = 0, False
-        self.rows, self.pending_selection = {}, {}
+        self.rows = {}
         self.removed_ids, self.selected_row = set(), None
         self.delete_pending = False
         self.remove_completed_pending = False
@@ -136,7 +136,8 @@ class App:
         self.filter_error_label.grid_remove()
         self.table = DownloadList(body, self.table_action, self.show_details,
                                   lambda widths: self.manager_action("set_column_widths", widths),
-                                  self.update_delete_button, self.delete_selected)
+                                  self.update_selection_buttons, self.delete_selected,
+                                  lambda preferences: self.manager_action("set_sort_preferences", preferences))
         self.table.grid(row=3, column=0, sticky="nsew")
         self.canvas = self.table.canvas
         controls = ttk.Frame(body)
@@ -145,7 +146,7 @@ class App:
         self.graph.pack(side="right")
         ttk.Button(controls, text="Select all", command=lambda: self.select_all(True)).pack(side="left")
         ttk.Button(controls, text="Select none", command=lambda: self.select_all(False)).pack(side="left", padx=6)
-        self.running_first = tk.BooleanVar(master=root, value=False)
+        self.running_first = tk.BooleanVar(master=root, value=self.manager.sort_preferences["running_first"])
         ttk.Checkbutton(controls, text="Running first", variable=self.running_first,
                         command=self.toggle_running_first).pack(side="left", padx=(8, 0))
         ttk.Label(controls, text="Click a file for its full key and status.").pack(side="left", padx=8)
@@ -191,6 +192,7 @@ class App:
         self.sizegrip.grid(row=0, column=3, padx=(5, 0), sticky="se")
         root.protocol("WM_DELETE_WINDOW", self.hide_to_tray)
         self.entry.focus_set()
+        self.table.restore_sort_preferences(self.manager.sort_preferences)
         self.table.set_widths(self.manager.column_widths)
         self.sync_tasks(self.manager.snapshot())
         self.action_thread = threading.Thread(target=action_worker, args=(self.manager, self.actions, self.events), daemon=True)
@@ -372,11 +374,25 @@ class App:
             self.status.set(f"Showing {shown} of {total} files.")
         elif not self.busy and not self.status.get().startswith("Error:"):
             self.status.set(f"{total} files: {active} running, {paused} paused, {done} complete. Queue saved automatically.")
-        self.download_button.configure(state="normal" if any(
-            self.rows[row]["desired"] != "done" for row in self.table.order) else "disabled")
+        self.update_download_button()
+
+    def update_download_button(self):
+        if self.closed or not hasattr(self, "download_button"):
+            return
+        identifiers = self.table.selected_visible_ids()
+        enabled = (not self.exiting and any(identifier in self.rows and
+                    self.rows[identifier].get("desired") != "done" for identifier in identifiers))
+        try:
+            self.download_button.configure(state="normal" if enabled else "disabled")
+        except tk.TclError:
+            pass
+
+    def update_selection_buttons(self):
+        self.update_download_button()
+        self.update_delete_button()
 
     def update_delete_button(self):
-        if self.closed:
+        if self.closed or not hasattr(self, "delete_button"):
             return
         enabled = bool(self.table.selected_visible_ids()) and not self.exiting and not self.delete_pending
         try:
@@ -436,12 +452,7 @@ class App:
     def table_action(self, name, row, *args):
         if row not in self.rows:
             return
-        if name == "select":
-            self.rows[row]["selected"] = bool(args[0])
-            self.pending_selection[row] = bool(args[0])
-            self.manager_action("select", row, bool(args[0]))
-        else:
-            self.manager_action(name, [row])
+        self.manager_action(name, [row])
 
     def show_details(self, row):
         if row not in self.rows:
@@ -460,13 +471,8 @@ class App:
 
     def sync_tasks(self, tasks):
         self.rows = {task["id"]: dict(task) for task in tasks if task["id"] not in self.removed_ids}
-        for row, checked in list(self.pending_selection.items()):
-            if row not in self.rows or self.rows[row]["selected"] == checked:
-                self.pending_selection.pop(row)
-            else:
-                self.rows[row]["selected"] = checked
         self.table.set_tasks(list(self.rows.values()))
-        self.update_delete_button()
+        self.update_selection_buttons()
         self.update_remove_completed_button()
         if self.selected_row in self.removed_ids or (self.selected_row is not None and self.selected_row not in self.rows):
             self.selected_row = None
@@ -477,7 +483,7 @@ class App:
         elif self.selected_row is None:
             self.detail_key.set("")
             self.detail_status.set("")
-        self.download_button.configure(state="normal" if any(self.rows[row]["desired"] != "done" for row in self.table.order) else "disabled")
+        self.update_download_button()
         active = sum(task["desired"] == "running" for task in self.rows.values())
         paused = sum(task["desired"] == "paused" for task in self.rows.values())
         done = sum(task["desired"] == "done" for task in self.rows.values())
@@ -532,15 +538,11 @@ class App:
         if not identifiers:
             self.status.set("No files match the current filename regex." if self.table.filter_text else "The queue has no files.")
             return
-        for row in identifiers:
-            task = self.rows[row]
-            task["selected"] = checked
-            self.pending_selection[row] = checked
-        self.table.set_tasks(list(self.rows.values()))
-        self.manager_action("select_many", identifiers, checked)
+        self.table.select_visible(checked)
 
     def download(self):
-        selected = [row for row in self.table.order if self.rows[row]["selected"] and self.rows[row]["desired"] != "done"]
+        selected = [row for row in self.table.selected_visible_ids()
+                    if row in self.rows and self.rows[row]["desired"] != "done"]
         if not selected:
             self.status.set("No files match the current filename regex." if not self.table.order else
                             "Select at least one visible file that has not already downloaded.")
@@ -614,7 +616,7 @@ class App:
             return
         self.flush_window_preferences()
         self.exiting = True
-        self.update_delete_button()
+        self.update_selection_buttons()
         self.update_remove_completed_button()
         self.cancel.set()
         self.set_busy(False)
@@ -740,8 +742,6 @@ class App:
         if latest_tasks is not None:
             self.sync_tasks(latest_tasks)
         if remove_ack_seen:
-            for identifier in removed_ack:
-                self.pending_selection.pop(identifier, None)
             if self.selected_row in removed_ack:
                 self.selected_row = None
                 self.detail_key.set("")
@@ -749,8 +749,6 @@ class App:
             self.sync_tasks(list(self.rows.values()))
             self.status.set(f"Removed {len(removed_ack)} unstarted file(s). Started files were kept.")
         if delete_ack is not None:
-            for identifier in delete_ack:
-                self.pending_selection.pop(identifier, None)
             if self.selected_row in delete_ack:
                 self.selected_row = None
                 self.detail_key.set("")
@@ -761,8 +759,6 @@ class App:
             self.update_delete_button()
         if completed_ack_seen:
             self.remove_completed_pending = False
-            for identifier in completed_ack:
-                self.pending_selection.pop(identifier, None)
             if self.selected_row in completed_ack:
                 self.selected_row = None
                 self.detail_key.set("")

@@ -54,6 +54,7 @@ class DemoManager:
         self.notify = notify
         self.tasks = {}
         self.column_widths = None
+        self.sort_preferences = {"column": "id", "descending": False, "running_first": False}
         self.window_preferences = {"width": 1280, "height": 720, "maximized": False}
         self.frozen = frozen
         self.closed = threading.Event()
@@ -77,23 +78,12 @@ class DemoManager:
                     by_key.add(key)
         self._changed()
 
-    def select(self, identifier, selected):
-        with self.lock:
-            task = self.tasks.get(identifier)
-            if task:
-                task["selected"] = bool(selected)
-        self._changed()
-
-    def select_many(self, identifiers, selected):
-        with self.lock:
-            for identifier in identifiers:
-                task = self.tasks.get(identifier)
-                if task:
-                    task["selected"] = bool(selected)
-        self._changed()
-
     def set_column_widths(self, widths):
         self.column_widths = list(widths)
+
+    def set_sort_preferences(self, preferences):
+        with self.lock:
+            self.sort_preferences = copy.deepcopy(preferences)
 
     def set_window_preferences(self, preferences):
         with self.lock:
@@ -636,12 +626,10 @@ class DemoRecorder:
         self.capture()
 
     def _select_files(self):
-        self._select_none.invoke()
         for filename in ("Orchid.jpg", "Harbor.mp4"):
             identifier = next(row["id"] for row in self.app.rows.values()
                               if row["filename"] == filename)
-            self.app.table.activate_row(identifier)
-            self.app.table.visible[identifier]["checkbox"].invoke()
+            self.app.table.select_gesture(identifier, control=True)
         self.capture()
 
     def _chosen_running(self):

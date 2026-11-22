@@ -1,5 +1,10 @@
 # Select all rows, completed cleanup, and standalone Windows release
 
+This document records the v0.1.0 release contract and evidence. The current
+v0.1.1 list contract supersedes its checkbox and four-control rules; the actual
+executable smoke also requires 11 headings, no Select column, and three shared
+row controls.
+
 This is the concrete implementation and acceptance contract for Ctrl+A row
 selection, Remove completed, and the first standalone Windows release. It
 extends the existing [selection design](selection-design.md). Runtime production

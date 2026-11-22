@@ -11,6 +11,11 @@ Start with [the feature map](README.md); read only the sections relevant to the 
 and linked architecture constraints in `development.md`. Update the index and
 affected references when implementation changes the contract.
 
+The current 11-column list, unified highlight scope, viewport anchoring, v2 width
+migration, and saved named sort behavior are governed by
+[list-fixes-design.md](list-fixes-design.md). Older checkbox, 12-column, and
+session-only sort rules below are historical and superseded by that contract.
+
 ## Scope and boundaries
 
 Add window size recovery, a resize grip, safe removal of unstarted tasks, fixed
@@ -19,7 +24,7 @@ hover highlighting. Preserve the standard-library-only application, local-node
 downloads, asynchronous queue actions, and virtual canvas rendering. Do not
 replace the list with Treeview, a widget-per-row table, or another toolkit.
 
-The visible column order is exactly:
+The historical v0.1.0 column order was:
 
 `ID`, `Select`, `File`, `Done / Size (MB)`, `MB/s`, `Status`, `Start`, `Pause`,
 `Cancel`, `Progress`, `Elapsed (min)`, `ETA (min)`.
@@ -27,15 +32,15 @@ The visible column order is exactly:
 Elapsed and ETA cells keep their `MM:SS` values. The minute suffix describes
 the metrics; it does not change the displayed value format.
 
-Use stable column names or centralized indices. New indices are 0 through 11;
-checkbox is 1, action buttons are 6/7/8, and progress is 9.
+The current column order is `ID`, `File`, `Done / Size (MB)`, `MB/s`, `Status`,
+`Start`, `Pause`, `Cancel`, `Progress`, `Elapsed (min)`, `ETA (min)`.
+Current indices are 0 through 10; action buttons are 5/6/7 and progress is 8.
+Use stable column names or centralized indices.
 
-Load old `column_widths` arrays of length 11 by prepending the natural ID width
-(at least 50px and wide enough for its heading). Keep every old width mapped to
-its original named column, unchanged apart from existing 40..2000px validation.
-Accept new arrays of length 12 directly. Ignore malformed/other-length metadata
-and use natural widths. Write the new 12-width form on the next width change;
-manager.set_column_widths must validate 12. Do not silently discard old widths.
+The current manager reads a valid `column_widths_v2` array of 11 integers first.
+Otherwise it converts old 12-column widths as `[old[0], *old[2:]]`, or pre-ID
+11-column widths as `[50, *old[1:]]`. It clamps values to 40..2000, preserves old
+metadata, and writes only `column_widths_v2` on a width change.
 
 ## Persisted task identity and start history
 
@@ -83,7 +88,7 @@ do not advertise full behavioral rollback compatibility.
 ## Remove unstarted and stale events
 
 Replace the Clear button with **Remove unstarted**. The operation acts on the
-entire queue, including hidden rows, regardless of checkboxes or sorting. Keep
+entire queue, including hidden rows, regardless of highlights or sorting. Keep
 every task with start history, including running, paused, cancelled, failed, and
 completed tasks. Completed files and started requests are untouched.
 
@@ -124,11 +129,12 @@ is ignored. The GUI must not decide start history from a stale snapshot.
 
 ## Row multi-selection and confirmed deletion
 
-Row highlights are transient UUIDs, separate from the persisted download
-checkbox. Sorting, progress reordering, scrolling, and filtering preserve
-highlight identity; deletion captures only selected visible UUIDs. Keep the
-selection, keyboard, menu, modal, acknowledgement, and owned-node cleanup rules
-in the [selection design](selection-design.md).
+Row highlights are transient UUIDs and the sole active selection for both
+Download selected and Delete selected. Legacy `task['selected']` values remain
+untouched. Sorting, progress reordering, scrolling, and filtering preserve
+highlight identity; visible actions use selected visible UUIDs. Current input,
+column, and saved-sort behavior is specified by
+[the list-fixes contract](list-fixes-design.md).
 
 `DownloadManager.delete_tasks` accepts exact existing non-removed UUIDs,
 checkpoints their `removed` intent, and returns accepted UUIDs. Keep tombstones
