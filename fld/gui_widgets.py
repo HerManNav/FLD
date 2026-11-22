@@ -227,8 +227,12 @@ class DownloadList(ttk.Frame):
 
     def move_to_y(self, y):
         region_height = max(self.canvas.winfo_height(), len(self.order) * self.ROW_HEIGHT, 1)
-        y = min(max(0, region_height - self.canvas.winfo_height()), max(0, y))
-        self.canvas.yview_moveto(y / region_height)
+        self.canvas.yview_moveto(min(1, max(0, y / region_height)))
+
+    def viewport_y(self):
+        inset = (self.canvas.winfo_pixels(self.canvas.cget("highlightthickness")) +
+                 self.canvas.winfo_pixels(self.canvas.cget("borderwidth")))
+        return self.canvas.canvasy(inset)
 
     def position_viewport(self, force=False):
         if not self.widths:
@@ -309,7 +313,7 @@ class DownloadList(ttk.Frame):
         if self.resize_id is not None:
             self.after_cancel(self.resize_id)
             self.resize_id = None
-        old_y = self.canvas.canvasy(0)
+        old_y = self.viewport_y()
         self.resize_columns(measure=False)
         self.move_to_y(old_y)
         self.render()
@@ -389,7 +393,7 @@ class DownloadList(ttk.Frame):
 
     def rebuild_projection(self, force_top=False, preserve=True):
         old_order = self.order
-        old_y = self.canvas.canvasy(0)
+        old_y = self.viewport_y()
         old_offset = old_y % self.ROW_HEIGHT
         old_first = old_order[min(len(old_order) - 1, max(0, int(old_y // self.ROW_HEIGHT)))] if old_order else None
         old_control = self.control_row

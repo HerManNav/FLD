@@ -212,30 +212,37 @@ class AppTest(unittest.TestCase):
         self.add_keys([KEY + f"/Scroll {index:03d}.mp4" for index in range(150)])
         table = self.app.table
         self.root.deiconify()
-        self.root.update_idletasks()
+        self.root.update()
         with self.manager.lock:
             for task in self.manager.tasks.values():
                 task["fraction"] = task["display_id"] / 151
         for task in self.manager.snapshot():
             table.tasks[task["id"]]["fraction"] = task["fraction"]
         table.sort_by(8)
-        table.canvas.yview_moveto(.5)
-        self.root.update_idletasks()
+        region_height = max(table.canvas.winfo_height(), len(table.order) * table.ROW_HEIGHT)
 
         def viewport_anchor():
-            y = table.canvas.canvasy(0)
+            y = table.viewport_y()
             index = min(len(table.order) - 1, int(y // table.ROW_HEIGHT))
             return table.order[index], y - index * table.ROW_HEIGHT
 
-        first, offset = viewport_anchor()
-        for step in range(6):
-            left, right = table.order[-2:]
-            table.tasks[left]["fraction"], table.tasks[right]["fraction"] = (
-                table.tasks[right]["fraction"], table.tasks[left]["fraction"])
-            table.refresh_metric_order()
+        max_y = max(0, region_height - table.canvas.winfo_height())
+        for target_y in (0, 960, 2400, max_y):
+            table.canvas.yview_moveto(1 if target_y == max_y else target_y / region_height)
             self.root.update_idletasks()
-            self.assertEqual(viewport_anchor()[0], first)
-            self.assertLessEqual(abs(viewport_anchor()[1] - offset), 1, f"reorder {step}")
+            first, offset = viewport_anchor()
+            before_yview = table.canvas.yview()
+            for step in range(10):
+                left, right = table.order[-2:]
+                table.tasks[left]["fraction"], table.tasks[right]["fraction"] = (
+                    table.tasks[right]["fraction"], table.tasks[left]["fraction"])
+                table.refresh_metric_order()
+                self.root.update_idletasks()
+                self.assertEqual(viewport_anchor()[0], first, f"anchor at {target_y}, reorder {step}")
+                self.assertLessEqual(abs(viewport_anchor()[1] - offset), 1,
+                                     f"offset at {target_y}, reorder {step}")
+                self.assertEqual(table.canvas.yview(), before_yview,
+                                 f"yview at {target_y}, reorder {step}")
 
         table.activate_row(first)
         table.pressed_cell = (first, 5, table.projection_generation)
@@ -246,7 +253,7 @@ class AppTest(unittest.TestCase):
         self.assertEqual(table.canvas.yview(), before_yview)
         self.assertEqual((table.pressed_cell, table.native_pressed), held)
 
-        original, _ = viewport_anchor()
+        original, offset = viewport_anchor()
         column = 1
         old_width = table.widths[column]
         table.start_resize(SimpleNamespace(x=old_width - 1, x_root=100, y_root=40), column)
@@ -255,6 +262,20 @@ class AppTest(unittest.TestCase):
         self.root.update_idletasks()
         self.assertEqual(viewport_anchor()[0], original)
         self.assertLessEqual(abs(viewport_anchor()[1] - offset), 1)
+        table.autosize(SimpleNamespace(x=table.widths[2] - 1), 2)
+        self.root.update_idletasks()
+        self.assertEqual(viewport_anchor()[0], original)
+        self.assertLessEqual(abs(viewport_anchor()[1] - offset), 1)
+
+        table.move_to_y(-100)
+        self.root.update_idletasks()
+        self.assertLessEqual(abs(table.viewport_y()), 1)
+        table.canvas.yview_moveto(1)
+        self.root.update_idletasks()
+        bottom_y = table.viewport_y()
+        table.move_to_y(10**9)
+        self.root.update_idletasks()
+        self.assertEqual(table.viewport_y(), bottom_y)
 
     def test_saved_named_sort_restores_before_projection_and_only_explicit_writes(self):
         self.add_keys([KEY + "/alpha.mp4", KEY + "/zeta.mp4"])

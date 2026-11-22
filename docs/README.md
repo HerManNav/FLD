@@ -41,6 +41,8 @@ The current list-fixes work is governed by
 It supersedes the older checkbox, four-control, session-only sort, and width
 metadata rules in the historical references. It records the reproduced scroll
 cause, exact compatibility rules, implementation handoff, and acceptance checks.
+The compact maintainer map and current scroll diagnosis live in
+[the final handoff](final-handoff.md).
 
 For a complete file inventory, consult
 [files and ownership](development.md#files-and-ownership). The detailed change
