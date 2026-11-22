@@ -96,6 +96,8 @@ class DownloadList(ttk.Frame):
             widget.bind("<Down>", self.keyboard_down)
             widget.bind("<Up>", self.keyboard_up)
             widget.bind("<Delete>", self.keyboard_delete)
+            widget.bind("<Control-a>", self.keyboard_select_all)
+            widget.bind("<Control-A>", self.keyboard_select_all)
             widget.bind("<Button-3>", self.context_press)
             if widget is self.controls["checkbox"]:
                 widget.bind("<space>", lambda event: self.toggle_focus())
@@ -111,6 +113,8 @@ class DownloadList(ttk.Frame):
         self.canvas.bind("<Down>", self.keyboard_down)
         self.canvas.bind("<Up>", self.keyboard_up)
         self.canvas.bind("<Delete>", self.keyboard_delete)
+        self.canvas.bind("<Control-a>", self.keyboard_select_all)
+        self.canvas.bind("<Control-A>", self.keyboard_select_all)
         self.canvas.bind("<Button-3>", self.context_press)
         self.canvas.bind("<space>", lambda event: self.toggle_focus())
         self.canvas.bind("<FocusIn>", lambda event: self.activate_row(
@@ -766,6 +770,13 @@ class DownloadList(ttk.Frame):
 
     def keyboard_delete(self, event):
         self.delete_selected()
+        return "break"
+
+    def keyboard_select_all(self, event):
+        before = set(self.selected_ids)
+        self.selected_ids.update(self.order)
+        if before != self.selected_ids:
+            self.paint_selection_change(before | self.selected_ids)
         return "break"
 
     def defer_hover_clear(self, event=None):

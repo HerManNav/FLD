@@ -143,6 +143,15 @@ class DemoManager:
         self._changed()
         return removed
 
+    def remove_completed(self):
+        with self.lock:
+            removed = [identifier for identifier, task in self.tasks.items()
+                       if task["desired"] == "done"]
+            for identifier in removed:
+                del self.tasks[identifier]
+        self._changed()
+        return removed
+
     def delete_tasks(self, identifiers):
         with self.lock:
             removed = [identifier for identifier in dict.fromkeys(identifiers) if identifier in self.tasks]

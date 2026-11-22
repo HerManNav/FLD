@@ -142,7 +142,7 @@ post-retry absence/removal verification before tombstone reclamation.
 Delete selected, the shared row menu, and table Delete key use the same frozen
 visible UUID snapshot and default-No confirmation. Completed output files remain
 on disk. Keep the two fixed action rows: Download selected/Pause all downloads/
-Cancel all above Remove unstarted/Delete selected, with Open download folder at
+Cancel all above Remove unstarted/Remove completed/Delete selected, with Open download folder at
 the right of the second row. This preserves full labels at the production
 DPI-aware 800x460 minimum. The implemented feature passed the
 [95-test native gate and mapped benchmark](selection-design.md#verification-results).
@@ -150,6 +150,24 @@ The README demo was refreshed to show the rabbit icon and action rows while
 preserving its existing narrative; its 24 encoded frames and final view passed
 verification. Exact artifact statistics are in
 [the development evidence](development.md#verification-commands-and-evidence).
+
+## Remove completed and standalone release
+
+The [release design](release-design.md) extends the selected-deletion foundation
+with table-local Ctrl+A, a global Remove completed action, and a portable Windows
+executable. Completed cleanup evaluates authoritative `desired == 'done'` UUIDs
+under the manager lock and reuses durable `delete_tasks`. It keeps output files,
+does not cancel scans, and handles its acknowledgement/error independently of
+scan generations. Keep the existing Remove unstarted behavior unchanged.
+
+The executable embeds Python/Tk and the ICO, keeps writable queue/download data
+beside the executable, and preserves source-launch paths. Build dependencies,
+actual executable smoke proof, and release acceptance belong in that contract.
+Historical test/layout results above do not verify the additional release work.
+The release's source gate passed 104 tests with both native opt-ins and no skips,
+and its production minimum-width layout passed with the additional button.
+Measured evidence and refreshed demo statistics are in
+[release verification](release-design.md#verification-results).
 
 ## View model, sorting, and filter semantics
 
@@ -233,7 +251,7 @@ selected** act only on visible matching rows. Hidden selections are preserved
 but never started by Download selected while hidden. With zero matches these
 actions are harmless no-ops with a clear status message. Use explicit UUID lists
 for bulk selection instead of manager.select_all when filtering. **Pause all
-downloads**, **Cancel all**, and **Remove unstarted** remain global, as their
+downloads**, **Cancel all**, **Remove unstarted**, and **Remove completed** remain global, as their
 labels imply. Counters and speed graph remain global; add the visible count
 without changing their meaning. Retain detail selection if its task is merely
 filtered out; clear it only if the task was removed.

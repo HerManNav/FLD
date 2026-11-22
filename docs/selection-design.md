@@ -5,6 +5,11 @@ icon changes. Preserve the existing queue-usability contracts except where this
 document explicitly extends them. Production remains standard-library-only.
 Implementation and focused review are complete. The 95-test native gate and
 mapped benchmark passed; measured results appear at the end of this document.
+The [standalone release contract](release-design.md) extends this baseline with
+Ctrl+A and Remove completed. Its acceptance checks require separate results.
+Their completed source checks and refreshed demo are recorded in the
+[release verification](release-design.md#verification-results); the historical
+95-test results below remain the previous selection/icon baseline.
 
 ## Owners and boundaries
 
@@ -70,6 +75,7 @@ Both painted fallback cells and native overlays must follow this rule.
 | Ctrl+Up/Down | Move focus only; retain highlights and anchor. |
 | Shift+Up/Down | Move focus and replace highlights with anchor-to-target range. |
 | Ctrl+Shift+Up/Down | Move focus and add anchor-to-target range. |
+| Ctrl+A | Add all currently visible UUIDs to highlights; preserve hidden selections, anchor, focus, details, viewport, and download checkboxes. |
 | Space | Toggle focused row's existing download checkbox; leave highlights unchanged. |
 | Delete | Invoke the same confirmed selected-deletion path as the button. |
 
@@ -81,6 +87,9 @@ Do not add root-level Delete bindings that intercept editing in source/filter
 entries. Canvas and native-checkbox Space use the focused UUID even when hover
 moved the shared overlay to another row; toggle once and suppress the checkbox
 class binding. Native Start/Pause/Cancel buttons retain normal Space activation.
+Ctrl+A follows the same canvas/four-control binding scope. It has no root/global
+binding and preserves source/filter entry text selection. Empty visible scope
+is a no-op. See the [extension contract](release-design.md#ctrla-row-highlights).
 
 Commit a row click only for a matching press/release UUID and projection
 generation. Sort, filter, removal, or scroll between press and release cancels
@@ -119,10 +128,12 @@ slots. Existing recycled-slot identity and native press validation still apply.
 Use two fixed action rows so the production DPI-aware window fits its 800px
 minimum without clipped labels. The first row contains Download selected,
 Pause all downloads, and Cancel all, in that order at the left. The second row
-contains Remove unstarted followed immediately by Delete selected at the left,
+contains Remove unstarted, Remove completed, and Delete selected at the left,
 with Open download folder aligned at the right. Keep the existing small gaps
 between adjacent buttons and about 4px between the two rows. Two shared layout
 frames are sufficient; no responsive breakpoint or resize handler is needed.
+The added completed cleanup button requires a fresh production minimum-width
+measurement; the historical results below covered the previous two-button row.
 Enable Delete selected only when at least one
 selected visible UUID exists and the app is neither exiting nor already showing
 or processing a selected-deletion confirmation. Completed rows are eligible.

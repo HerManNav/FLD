@@ -603,6 +603,36 @@ os._exit(0)
         manager.pause(["missing-uuid"])
         self.assertEqual([task["id"] for task in manager.snapshot()], [started])
 
+    def test_remove_completed_uses_authoritative_done_state_and_keeps_output(self):
+        manager = DownloadManager(self.root / "completed.sqlite3", self.root / "completed-downloads", autostart=False)
+        self.managers.append(manager)
+        manager.add([KEY + "/done.mp4", KEY + "/running.zip", KEY + "/new.jpg"])
+        done, running, new = [task["id"] for task in manager.snapshot()]
+        output = self.root / "completed-downloads" / "done.mp4"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(PAYLOAD)
+        with manager.lock:
+            manager.tasks[done].update(desired="done", status="Downloaded", path=str(output), fraction=1)
+            manager.tasks[running].update(desired="running", status="Downloaded", fraction=1)
+        self.assertEqual(manager.remove_completed(), [done])
+        self.assertEqual(manager.remove_completed(), [])
+        remaining = {task["id"] for task in manager.snapshot()}
+        self.assertEqual(remaining, {running, new})
+        self.assertEqual(output.read_bytes(), PAYLOAD)
+
+    def test_remove_completed_checkpoint_failure_restores_done_record(self):
+        manager = DownloadManager(self.root / "completed-rollback.sqlite3",
+                                  self.root / "completed-rollback-downloads", autostart=False)
+        self.managers.append(manager)
+        manager.add([KEY + "/done.mp4"])
+        identifier = manager.snapshot()[0]["id"]
+        with manager.lock:
+            manager.tasks[identifier].update(desired="done", status="Downloaded")
+        with patch.object(manager.store, "save", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                manager.remove_completed()
+        self.assertEqual(manager.snapshot()[0]["desired"], "done")
+
     def test_delete_tasks_tombstones_exact_uuids_and_preserves_completed_file(self):
         manager = DownloadManager(self.root / "delete.sqlite3", self.root / "delete-downloads", autostart=False)
         self.managers.append(manager)

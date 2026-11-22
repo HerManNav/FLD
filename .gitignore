@@ -4,3 +4,9 @@ downloads/
 queue.sqlite3*
 queue.lock
 .demo-capture/
+.venv-build/
+build/
+dist/
+FLD.exe
+FLD.exe.sha256
+smoke-report.json

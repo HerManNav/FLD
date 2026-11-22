@@ -260,6 +260,57 @@ class AppTest(unittest.TestCase):
         self.assertTrue(self.app.rows[second]["selected"])
         self.assertEqual(table.selected_ids, {first})
 
+    def test_ctrl_a_selects_visible_rows_without_changing_table_state(self):
+        self.add_keys([KEY + "/visible-a.mp4", KEY + "/hidden-b.zip", KEY + "/visible-c.jpg"])
+        table = self.app.table
+        first, hidden, third = table.order
+        table.configure_filter(r"visible")
+        self.root.deiconify()
+        self.root.update()
+        table.selected_ids = {hidden}
+        table.anchor_id, table.focus_id = "absent-anchor", "absent-focus"
+        table.control_row = first
+        self.app.selected_row = hidden
+        checkboxes = {row: self.app.rows[row]["selected"] for row in table.tasks}
+        view = (table.view_x, table.view_y)
+        table.canvas.focus_force()
+        table.canvas.event_generate("<Control-a>")
+        self.root.update()
+        self.assertEqual(table.selected_ids, {first, hidden, third})
+        self.assertEqual((table.anchor_id, table.focus_id), ("absent-anchor", "absent-focus"))
+        self.assertEqual(table.control_row, first)
+        self.assertEqual(self.app.selected_row, hidden)
+        self.assertEqual({row: task["selected"] for row, task in self.app.rows.items()}, checkboxes)
+        self.assertEqual((table.view_x, table.view_y), view)
+        self.assertTrue(table.canvas.bind("<Control-a>"))
+        self.assertTrue(all(widget.bind("<Control-A>") for widget in table.controls.values()))
+        for widget in table.controls.values():
+            table.selected_ids = {hidden}
+            table.anchor_id, table.focus_id = "absent-anchor", "absent-focus"
+            widget.focus_force()
+            widget.event_generate("<Control-A>")
+            self.root.update()
+            self.assertEqual(table.selected_ids, {first, hidden, third})
+            self.assertEqual((table.anchor_id, table.focus_id), ("absent-anchor", "absent-focus"))
+        table.configure_filter(r"no-match")
+        table.selected_ids = {hidden}
+        table.canvas.focus_force()
+        table.canvas.event_generate("<Control-a>")
+        self.root.update()
+        self.assertEqual(table.order, [])
+        self.assertEqual(table.selected_ids, {hidden})
+
+    def test_ctrl_a_in_source_and_filter_entries_keeps_native_text_selection(self):
+        self.app.source.set("source text")
+        self.app.filter_text.set("filter text")
+        self.root.deiconify()
+        self.root.update()
+        for entry in (self.app.entry, self.app.filter_entry):
+            entry.focus_force()
+            entry.event_generate("<Control-a>")
+            self.root.update()
+            self.assertTrue(entry.selection_present())
+
     def test_scrolling_keeps_overlapping_rows_in_the_same_controls(self):
         self.add_keys([KEY + f"/File {index:03d}.mp4" for index in range(150)])
         table = self.app.table
@@ -631,6 +682,79 @@ class AppTest(unittest.TestCase):
         self.wait(lambda: new_id in self.app.rows and old_id not in self.app.rows)
         self.assertNotIn(old_id, self.app.table.selected_ids)
         self.assertEqual(self.app.selected_row, None)
+
+    def test_remove_completed_is_global_serialized_and_preserves_files(self):
+        self.add_keys([KEY + "/done.mp4", KEY + "/running.zip", KEY + "/new.jpg"])
+        done, running, new = self.app.table.order
+        output = self.folder / "downloads" / "done.mp4"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(PAYLOAD)
+        with self.manager.lock:
+            self.manager.tasks[done].update(desired="done", status="100%", path=str(output))
+            self.manager.tasks[running].update(desired="running", status="Downloaded", fraction=1)
+        self.app.sync_tasks(self.manager.snapshot())
+        self.app.table.configure_filter(r"new")
+        self.assertEqual(str(self.app.remove_completed_button["state"]), "normal")
+        generation, cancelled = self.app.generation, self.app.cancel.is_set()
+        with patch("fld.app.messagebox.askyesno", side_effect=AssertionError("unexpected modal")):
+            self.app.remove_completed_button.invoke()
+        self.assertTrue(self.app.remove_completed_pending)
+        self.assertEqual((self.app.generation, self.app.cancel.is_set()), (generation, cancelled))
+        self.wait(lambda: not self.app.remove_completed_pending and done not in self.app.rows)
+        self.assertEqual(set(self.app.rows), {running, new})
+        self.assertEqual(self.manager.tasks[done]["desired"], "removed")
+        self.assertEqual(output.read_bytes(), PAYLOAD)
+        self.assertEqual(self.app.status.get(), "Removed 1 completed task(s). Completed files were kept on disk.")
+
+    def test_remove_completed_error_resets_pending_state(self):
+        self.add_keys([KEY + "/completed-error.mp4"])
+        row = self.app.table.order[0]
+        task = dict(self.app.rows[row], desired="done")
+        self.app.sync_tasks([task])
+        with patch.object(self.manager, "remove_completed", side_effect=OSError("disk full")):
+            self.app.remove_completed()
+            self.wait(lambda: not self.app.remove_completed_pending)
+        self.assertEqual(self.app.status.get(), "Error: disk full")
+        self.assertIn(row, self.app.rows)
+
+    def test_remove_completed_ack_precedes_stale_generation_snapshot(self):
+        self.add_keys([KEY + "/same-key.mp4"])
+        old_id = self.app.table.order[0]
+        old_task = dict(self.app.rows[old_id], desired="done")
+        self.app.sync_tasks([old_task])
+        self.app.table.set_row_selection({old_id}, old_id, old_id)
+        new_task = dict(old_task, id="fresh-uuid")
+        while True:
+            try:
+                self.app.events.get_nowait()
+            except Exception:
+                break
+        stale_generation = self.app.generation - 1
+        self.app.events.put((stale_generation, "tasks", ([old_task],)))
+        self.app.events.put((stale_generation, "remove_completed_done", ([old_id],)))
+        self.app.events.put((stale_generation, "tasks", ([old_task, new_task],)))
+        self.wait(lambda: old_id not in self.app.rows and "fresh-uuid" in self.app.rows)
+        self.assertEqual(self.app.table.selected_ids, set())
+        self.assertEqual(self.app.status.get(), "Removed 1 completed task(s). Completed files were kept on disk.")
+
+    def test_remove_completed_zero_ack_pending_guard_and_exit_enablement(self):
+        self.add_keys([KEY + "/stale-completed.mp4"])
+        row = self.app.table.order[0]
+        self.app.sync_tasks([dict(self.app.rows[row], desired="done")])
+        self.app.exiting = True
+        self.app.update_remove_completed_button()
+        self.assertEqual(str(self.app.remove_completed_button["state"]), "disabled")
+        self.app.remove_completed()
+        self.assertFalse(self.app.remove_completed_pending)
+        self.app.exiting = False
+        self.app.update_remove_completed_button()
+        with patch.object(self.app.actions, "put", wraps=self.app.actions.put) as enqueue:
+            self.app.remove_completed()
+            self.app.remove_completed()
+            self.assertEqual(enqueue.call_count, 1)
+        self.wait(lambda: not self.app.remove_completed_pending)
+        self.assertIn(row, self.app.rows)
+        self.assertEqual(self.app.status.get(), "Removed 0 completed task(s). Completed files were kept on disk.")
 
     def test_sort_unknown_ties_running_first_and_metric_tick_invalidation(self):
         self.add_keys([KEY + f"/file{index}.jpg" for index in range(4)])

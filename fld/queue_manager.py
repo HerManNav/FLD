@@ -260,6 +260,12 @@ class DownloadManager:
                 self.checkpoint(True)
         return removed
 
+    def remove_completed(self):
+        with self.lock:
+            identifiers = tuple(identifier for identifier, task in self.tasks.items()
+                                if task.get("desired") == "done")
+            return self.delete_tasks(identifiers)
+
     def delete_tasks(self, identifiers):
         """Durably mark exact task UUIDs removed; node cleanup stays asynchronous."""
         with self.lock:

@@ -27,6 +27,9 @@ def action_worker(manager, actions, events):
             if name == "remove_unstarted":
                 events.put((generation, "remove_done", (manager.remove_unstarted(),)))
                 continue
+            if name == "remove_completed":
+                events.put((None, "remove_completed_done", (manager.remove_completed(),)))
+                continue
             if name == "delete_tasks":
                 events.put((None, "delete_done", (manager.delete_tasks(*args),)))
                 continue
@@ -39,8 +42,15 @@ def action_worker(manager, actions, events):
             else:
                 getattr(manager, name)(*args)
         except Exception as exc:
-            kind = "scan_error" if name == "scan_add" else ("delete_error" if name == "delete_tasks" else "action_error")
-            events.put((None if name == "delete_tasks" else generation, kind, (str(exc),)))
+            if name == "scan_add":
+                kind, event_generation = "scan_error", generation
+            elif name == "delete_tasks":
+                kind, event_generation = "delete_error", None
+            elif name == "remove_completed":
+                kind, event_generation = "remove_completed_error", None
+            else:
+                kind, event_generation = "action_error", generation
+            events.put((event_generation, kind, (str(exc),)))
         finally:
             actions.task_done()
 
@@ -56,6 +66,7 @@ class App:
         self.rows, self.pending_selection = {}, {}
         self.removed_ids, self.selected_row = set(), None
         self.delete_pending = False
+        self.remove_completed_pending = False
         self.filter_after_id = self.geometry_after_id = None
         self.window_state_after_ids = set()
         self.restoring_window_state = False
@@ -158,6 +169,9 @@ class App:
         self.cancel_button = ttk.Button(primary_actions, text="Cancel all", command=self.stop, state="disabled")
         self.cancel_button.pack(side="left")
         ttk.Button(secondary_actions, text="Remove unstarted", command=self.remove_unstarted).pack(side="left", padx=(0, 8))
+        self.remove_completed_button = ttk.Button(secondary_actions, text="Remove completed",
+            command=self.remove_completed, state="disabled")
+        self.remove_completed_button.pack(side="left", padx=(0, 8))
         self.delete_button = ttk.Button(secondary_actions, text="Delete selected", command=self.delete_selected, state="disabled")
         self.delete_button.pack(side="left")
         ttk.Button(secondary_actions, text="Open download folder", command=self.open_folder).pack(side="right")
@@ -370,6 +384,25 @@ class App:
         except tk.TclError:
             pass
 
+    def update_remove_completed_button(self):
+        if self.closed:
+            return
+        enabled = any(task.get("desired") == "done" for task in self.rows.values()) and not self.exiting and not self.remove_completed_pending
+        try:
+            self.remove_completed_button.configure(state="normal" if enabled else "disabled")
+        except tk.TclError:
+            pass
+
+    def remove_completed(self):
+        if self.closed or self.exiting or self.remove_completed_pending:
+            return
+        if not any(task.get("desired") == "done" for task in self.rows.values()):
+            self.update_remove_completed_button()
+            return
+        self.remove_completed_pending = True
+        self.update_remove_completed_button()
+        self.actions.put(("remove_completed", (), None, None))
+
     def delete_selected(self):
         if self.closed or self.exiting or self.delete_pending:
             return
@@ -434,6 +467,7 @@ class App:
                 self.rows[row]["selected"] = checked
         self.table.set_tasks(list(self.rows.values()))
         self.update_delete_button()
+        self.update_remove_completed_button()
         if self.selected_row in self.removed_ids or (self.selected_row is not None and self.selected_row not in self.rows):
             self.selected_row = None
             self.detail_key.set("")
@@ -581,6 +615,7 @@ class App:
         self.flush_window_preferences()
         self.exiting = True
         self.update_delete_button()
+        self.update_remove_completed_button()
         self.cancel.set()
         self.set_busy(False)
         self.status.set("Exiting; saving queue and pending controls...")
@@ -592,6 +627,7 @@ class App:
             return
         self.flush_window_preferences()
         self.exiting = True
+        self.update_remove_completed_button()
         self.cancel.set()
         self.actions.put(("stop", (), None, None))
         self.action_thread.join(6)
@@ -638,6 +674,8 @@ class App:
         removed_ack = set()
         remove_ack_seen = False
         delete_ack = None
+        completed_ack = None
+        completed_ack_seen = False
         for _ in range(1000):
             try:
                 generation, kind, values = self.events.get_nowait()
@@ -660,10 +698,16 @@ class App:
             if kind == "action_error":
                 self.status.set("Error: " + values[0])
                 self.exiting = False
+                self.update_remove_completed_button()
                 continue
             if kind == "delete_error":
                 self.delete_pending = False
                 self.update_delete_button()
+                self.status.set("Error: " + values[0])
+                continue
+            if kind == "remove_completed_error":
+                self.remove_completed_pending = False
+                self.update_remove_completed_button()
                 self.status.set("Error: " + values[0])
                 continue
             if kind == "remove_done":
@@ -675,6 +719,11 @@ class App:
                 delete_ack = tuple(values[0])
                 self.removed_ids.update(delete_ack)
                 self.delete_pending = False
+                continue
+            if kind == "remove_completed_done":
+                completed_ack_seen = True
+                completed_ack = tuple(values[0])
+                self.removed_ids.update(completed_ack)
                 continue
             if generation != self.generation:
                 continue
@@ -710,6 +759,18 @@ class App:
             self.table.clear_selection_ids(delete_ack)
             self.status.set(f"Removed {len(delete_ack)} selected task(s). Completed files were kept on disk.")
             self.update_delete_button()
+        if completed_ack_seen:
+            self.remove_completed_pending = False
+            for identifier in completed_ack:
+                self.pending_selection.pop(identifier, None)
+            if self.selected_row in completed_ack:
+                self.selected_row = None
+                self.detail_key.set("")
+                self.detail_status.set("")
+            self.table.clear_selection_ids(completed_ack)
+            self.sync_tasks(list(self.rows.values()))
+            self.status.set(f"Removed {len(completed_ack)} completed task(s). Completed files were kept on disk.")
+            self.update_remove_completed_button()
         self.poll_id = self.root.after(50, self.poll)
 
 

@@ -39,7 +39,10 @@ the caveman skill for conversation unless the user explicitly changes modes.
 | fld/node_protocol.py | Persistent FCP framing and local-node restart request |
 | fld/key_parser.py | Key extraction, source normalization, safe filenames |
 | fld/freenet.py | HTTP/local FCP page retrieval, limits, cancellation |
-| fld/paths.py | Project-rooted runtime paths for downloads, queue, and icon |
+| fld/paths.py | Source/frozen runtime paths for writable downloads/queue and bundled icon |
+| fld/smoke_test.py | Isolated actual-executable GUI/action-worker/resource/shutdown verification using temporary state and no node connection |
+| FLD.spec, build_windows.ps1, requirements-build.txt, version_info.txt | Isolated, pinned Windows executable build and version resource |
+| fld/smoke_test.py | Frozen-only isolated production-window and action-worker smoke check |
 | fld/windows_tray.py | Native Windows notification icon, native tray menu, duplicate notification handling |
 | tests/fake_node.py | Local mock persistent FCP node and restart web endpoint |
 | tests/test_app.py | Tk integration, scan responsiveness, list controls/rendering, tray integration through doubles |
@@ -51,13 +54,34 @@ the caveman skill for conversation unless the user explicitly changes modes.
 | tools/generate_icon.py | Rebuild app icon from included vector geometry |
 | tools/demo_app.py | In-memory toy-data demo and own-window visual export; never uses the user's queue or node |
 | tools/make_demo_gif.py | Tool-only Pillow encoder for captured BMP/PNG frames and recording manifests |
+| FLD.spec, version_info.txt | One-file windowed Windows executable, bundled ICO, and 0.1.0 resource metadata |
+| build_windows.ps1, requirements-build.txt | Pinned Python/PyInstaller build validation and isolated build dependencies |
 
-`Start FLD.bat` starts the app. Production requires only Python with Tkinter and
-the standard library. Assets live beside the code. Resolve persistent paths
+`Start FLD.bat` starts the source app, which requires Python with Tkinter and
+the standard library. The standalone executable bundles that runtime. Source
+assets live beside the code. Resolve persistent paths
 through `fld.paths`, never the terminal's working directory. Moving source into
 `fld/` does not move `queue.sqlite3`, `queue.lock`, `downloads/`, or `assets/`:
 they remain beside the root `app.py` launcher. The package initializer has no
 startup side effects; the launcher calls `fld.app.main()` only when executed.
+The standalone release contract preserves these source paths and separates the
+frozen executable's writable data folder from its bundled icon resources. See
+[portable executable and runtime paths](release-design.md#portable-executable-and-runtime-paths)
+for build ownership, the pinned build-only dependency, and isolated smoke proof.
+
+## Standalone Windows build
+
+Use 64-bit Python 3.15.2. From the repository root, create the isolated build
+environment and install exact build pins:
+
+```powershell
+py -3.15-64 -m venv .venv-build
+.venv-build\Scripts\python.exe -m pip install -r requirements-build.txt
+.\build_windows.ps1
+```
+
+The script checks Python and PyInstaller versions before running checked-in
+`FLD.spec`. It writes `dist/FLD.exe`; this build setup adds no runtime packages.
 
 ## GUI and thread boundaries
 
@@ -87,6 +111,9 @@ acknowledgement. It leaves scans running. Hidden selected UUIDs survive filterin
 but are outside deletion scope. Acknowledgements precede scan-generation checks
 and coalesced snapshots; errors and cancellation release the modal/pending guard.
 See the [selection contract](selection-design.md#button-confirmation-and-acknowledgement).
+Remove completed uses the same durable deletion seam with authoritative done
+UUIDs and its own worker acknowledgement/error. It is global and leaves scans
+running. See the [completed cleanup contract](release-design.md#remove-completed).
 
 One-second tick samples global active speed and refreshes progress/timers.
 Selection and state changes render immediately. In the tray, data and graph
@@ -114,6 +141,10 @@ checkbox Space toggle the focused UUID's download checkbox once, independently
 of hover. Right-click preserves an already selected group or selects one new
 UUID before showing the shared Delete selected menu. Delete acts only while
 the table or its native row controls have keyboard focus.
+Ctrl+A uses that same table-local focus scope and adds visible UUID highlights
+without changing download checkboxes, anchor, focus, details, or the viewport.
+Source and filter entry text selection remains native. See the
+[Ctrl+A contract](release-design.md#ctrla-row-highlights).
 Hide overlays during scrolling, then restore them after a 150ms quiet interval.
 Keep canvas press/release fallback working before native overlays appear.
 
@@ -400,15 +431,24 @@ The recording command creates BMP frames and a duration manifest. Keep this
 scratch recording out of deliverables; retain the encoded GIF and demo tools.
 
 The current `assets/demo.gif` was refreshed for the rabbit icon and two action
-rows, preserving the existing demo narrative and `Elapsed (min)`/`ETA (min)`
+rows, including Remove completed, preserving the existing demo narrative and `Elapsed (min)`/`ETA (min)`
 headings. The `--record` run produced 24 frames over about 22 seconds. The encoded
 GIF contains 24 decoded 1280x720 frames, loops indefinitely (`loop=0`), lasts
-21,880ms, and occupies 2,855,027 bytes. Its source frames came from the demo's
+21,910ms, and occupies 2,996,419 bytes. Its source frames came from the demo's
 actual owned Tk window; every encoded frame decoded successfully. The encoded
 final frame was visually verified: the rabbit caption icon, both action rows,
-Delete selected, and both minute headings are present; two rows have completed
+Delete selected, Remove completed, and both minute headings are present; two rows have completed
 green bars, six rows are Ready, completed elapsed values are 12s and 13s, and
 the graph reads 0MB/s. The earlier recording's empty, scanning, and filtered
 progress states were already visually verified; this refresh changes only the
 visual asset and layout. The root README embeds the current GIF. Recording
 scratch is build-only; the reproducible demo/export tools remain.
+
+The standalone-release source gate passed all 104 tests with both native
+Windows opt-ins and no skips in 30.523 seconds on 2026-11-22. The mapped
+150-task benchmark measured one-row scrolling at 9.5ms mean, 11.4ms p95,
+and 11.8ms maximum; three-row scrolling with progress measured 11.2ms mean,
+13.3ms p95, and 13.5ms maximum. The four shared controls and bounded visible
+slot pool remain intact. Production DPI-aware 800x460 measurements confirmed
+all second-row labels fit. Full release, build, and actual-artifact evidence
+belongs in [release verification](release-design.md#verification-results).
